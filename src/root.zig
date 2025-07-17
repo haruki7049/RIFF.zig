@@ -6,7 +6,7 @@ pub const Chunk = struct {
 
     id: [4]u8,
     four_cc: [4]u8,
-    data: []u8,
+    data: []const u8,
 
     /// Calculate this chunk's data size
     /// This function uses Byte
@@ -19,18 +19,28 @@ pub const Chunk = struct {
 
     fn to_binary(self: Self, allocator: Allocator) ![]u8 {
         const id_bin: []const u8 = self.id[0..];
-        const size_bin: []const u8 = convert_size(self.size());
+        const size_bin = self.convert_size(self.size());
         const four_cc_bin: []const u8 = self.four_cc[0..];
-        const data_bin: []const u8 = self.data[0..];
+        const data_bin: []const u8 = self.data;
 
-        const result: []u8 = try std.mem.concat(allocator, u8, &.{
-            id_bin,
-            size_bin,
-            four_cc_bin,
-            data_bin,
-        });
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
 
-        return result;
+        try result.appendSlice(id_bin);
+        try result.appendSlice(&size_bin);
+        try result.appendSlice(four_cc_bin);
+        try result.appendSlice(data_bin);
+
+        return result.toOwnedSlice();
+    }
+
+    fn convert_size(_: Self, value: usize) [4]u8 {
+        return [4]u8{
+            @intCast(value & 0xFF),
+            @intCast((value >> 8) & 0xFF),
+            @intCast((value >> 16) & 0xFF),
+            @intCast((value >> 24) & 0xFF),
+        };
     }
 };
 
@@ -39,7 +49,7 @@ pub const RIFFChunk = struct {
 
     id: [4]u8 = .{ 'R', 'I', 'F', 'F' },
     four_cc: [4]u8,
-    data: []Data,
+    data: []const Data,
 
     /// Calculate this RIFFChunk's data size
     /// This function uses Byte
@@ -65,23 +75,51 @@ pub const RIFFChunk = struct {
         return data_size + four_cc_size;
     }
 
+    fn convert_size(_: Self, value: usize) [4]u8 {
+        return [4]u8{
+            @intCast(value & 0xFF),
+            @intCast((value >> 8) & 0xFF),
+            @intCast((value >> 16) & 0xFF),
+            @intCast((value >> 24) & 0xFF),
+        };
+    }
+
+    fn convert_data(_: Self, values: []const RIFFChunk.Data, allocator: Allocator) ![]u8 {
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
+        for (values) |value| {
+            const binary = switch (value) {
+                .chunk => try value.chunk.to_binary(allocator),
+                .list => try value.list.to_binary(allocator),
+            };
+
+            try result.appendSlice(binary);
+            allocator.free(binary);
+        }
+
+        return result.toOwnedSlice();
+    }
+
     pub fn to_binary(
         self: Self,
         allocator: std.mem.Allocator,
     ) ![]const u8 {
         const id_bin: []const u8 = self.id[0..];
-        const size_bin: []const u8 = convert_size(self.size());
+        const size_bin: []const u8 = &self.convert_size(self.size());
         const four_cc_bin: []const u8 = self.four_cc[0..];
-        const data_bin: []u8 = try convert_data(self.data, allocator);
+        const data_bin: []const u8 = try self.convert_data(self.data, allocator);
+        defer allocator.free(data_bin);
 
-        const result: []const u8 = try std.mem.concat(allocator, u8, &.{
-            id_bin,
-            size_bin,
-            four_cc_bin,
-            data_bin,
-        });
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
 
-        return result;
+        try result.appendSlice(id_bin);
+        try result.appendSlice(size_bin);
+        try result.appendSlice(four_cc_bin);
+        try result.appendSlice(data_bin);
+
+        return result.toOwnedSlice();
     }
 
     pub const Data = union(DataTag) {
@@ -119,61 +157,46 @@ pub const ListChunk = struct {
         return four_cc_size + data_size;
     }
 
+    fn convert_size(_: Self, value: usize) [4]u8 {
+        return [4]u8{
+            @intCast(value & 0xFF),
+            @intCast((value >> 8) & 0xFF),
+            @intCast((value >> 16) & 0xFF),
+            @intCast((value >> 24) & 0xFF),
+        };
+    }
+
     fn to_binary(self: Self, allocator: Allocator) ![]u8 {
         const id_bin: []const u8 = self.id[0..];
-        const size_bin: []const u8 = convert_size(self.size());
+        const size_bin: [4]u8 = self.convert_size(self.size());
         const four_cc_bin: []const u8 = self.four_cc[0..];
         const data_bin: []const u8 = try convert_chunks(self.data[0..], allocator);
+        defer allocator.free(data_bin);
 
-        const result: []u8 = try std.mem.concat(allocator, u8, &.{
-            id_bin,
-            size_bin,
-            four_cc_bin,
-            data_bin,
-        });
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
 
-        return result;
+        try result.appendSlice(id_bin);
+        try result.appendSlice(&size_bin);
+        try result.appendSlice(four_cc_bin);
+        try result.appendSlice(data_bin);
+
+        return result.toOwnedSlice();
     }
 
     fn convert_chunks(chunks: []Chunk, allocator: Allocator) ![]u8 {
-        const result: []u8 = &.{};
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
         for (chunks) |chunk| {
-            std.mem.copyForwards(u8, result, try chunk.to_binary(allocator));
+            const binary = try chunk.to_binary(allocator);
+            try result.appendSlice(binary);
+            allocator.free(binary);
         }
 
-        return result;
+        return result.toOwnedSlice();
     }
 };
-
-fn convert_size(value: usize) []const u8 {
-    return &[_]u8{
-        @intCast(value & 0xFF),
-        @intCast((value >> 8) & 0xFF),
-        @intCast((value >> 16) & 0xFF),
-        @intCast((value >> 24) & 0xFF),
-    };
-}
-
-fn convert_data(values: []RIFFChunk.Data, allocator: Allocator) ![]u8 {
-    const stack: []u8 = &.{};
-
-    for (values) |value| {
-        switch (value) {
-            .chunk => {
-                std.mem.copyBackwards(u8, stack, try value.chunk.to_binary(allocator));
-            },
-            .list => {
-                std.mem.copyBackwards(u8, stack, try value.list.to_binary(allocator));
-            },
-        }
-    }
-
-    const result: []u8 = try std.mem.concat(allocator, u8, &.{
-        stack,
-    });
-
-    return result;
-}
 
 test "minimal_list" {
     const list: ListChunk = ListChunk{
