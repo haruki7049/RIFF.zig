@@ -1,0 +1,18 @@
+.{
+    .name = .simple_riff,
+    .version = "0.0.0",
+    .fingerprint = 0x9fe32d51128b69d2,
+    .minimum_zig_version = "0.14.1",
+
+    .dependencies = .{
+        .riff_zig = .{
+            .path = "../..",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

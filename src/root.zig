@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Chunk = struct {
+pub const Chunk = struct {
     const Self = @This();
 
     id: [4]*const u8,
@@ -9,7 +9,7 @@ const Chunk = struct {
 
     /// Calculate this chunk's data size
     /// This function uses Byte
-    fn size(self: Self) usize {
+    pub fn size(self: Self) usize {
         const four_cc_size: usize = self.four_cc.len;
         const data_size: usize = self.data.len;
 
@@ -17,7 +17,7 @@ const Chunk = struct {
     }
 };
 
-const RIFFChunk = struct {
+pub const RIFFChunk = struct {
     const Self = @This();
 
     const id: []const u8 = "RIFF";
@@ -27,7 +27,7 @@ const RIFFChunk = struct {
 
     /// Calculate this chunk's data size
     /// This function uses Byte
-    fn size(self: Self) usize {
+    pub fn size(self: Self) usize {
         const four_cc_size = self.four_cc.len;
         var data_size: usize = 0;
 
@@ -60,7 +60,7 @@ const RIFFChunk = struct {
     };
 };
 
-const ListChunk = struct {
+pub const ListChunk = struct {
     const Self = @This();
 
     id: [4]*const u8 = .{ &'L', &'I', &'S', &'T' },
@@ -69,7 +69,7 @@ const ListChunk = struct {
 
     /// Calculate this chunk's data size
     /// This function uses Byte
-    fn size(self: Self) usize {
+    pub fn size(self: Self) usize {
         const four_cc_size = self.four_cc.len;
         const data_size: usize = blk: {
             var result: usize = 0;
