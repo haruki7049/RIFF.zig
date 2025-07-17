@@ -15,11 +15,11 @@ pub fn main() !void {
     const bin: []const u8 = try riff_chunk.to_binary(gpa);
     defer gpa.free(bin);
 
-    std.debug.print("{any}\n", .{bin});
+    // std.debug.print("{any}\n", .{bin});
 
     const file = try std.fs.cwd().createFile(
         "simple.riff",
-        .{ .read = true, .truncate = true },
+        .{ .read = true },
     );
     defer file.close();
 
