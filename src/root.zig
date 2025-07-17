@@ -20,12 +20,11 @@ pub const Chunk = struct {
 pub const RIFFChunk = struct {
     const Self = @This();
 
-    const id: []const u8 = "RIFF";
-
+    id: [4]*const u8 = .{ &'R', &'I', &'F', &'F' },
     four_cc: [4]*const u8,
     data: []const Data,
 
-    /// Calculate this chunk's data size
+    /// Calculate this RIFFChunk's data size
     /// This function uses Byte
     pub fn size(self: Self) usize {
         const four_cc_size = self.four_cc.len;
@@ -67,7 +66,7 @@ pub const ListChunk = struct {
     four_cc: [4]*const u8,
     data: []const Chunk,
 
-    /// Calculate this chunk's data size
+    /// Calculate this list's data size
     /// This function uses Byte
     pub fn size(self: Self) usize {
         const four_cc_size = self.four_cc.len;
