@@ -3,91 +3,180 @@ const std = @import("std");
 const Chunk = struct {
     const Self = @This();
 
-    id: []const u8,
-    four_cc: []const u8,
-    data: Data,
+    id: [4]*const u8,
+    four_cc: [4]*const u8,
+    data: []const u8,
 
+    /// Calculate this chunk's data size
+    /// This function uses Byte
+    fn size(self: Self) usize {
+        const four_cc_size: usize = self.four_cc.len;
+        const data_size: usize = self.data.len;
+
+        return four_cc_size + data_size;
+    }
+};
+
+const RIFFChunk = struct {
+    const Self = @This();
+
+    const id: []const u8 = "RIFF";
+
+    four_cc: [4]*const u8,
+    data: []const Data,
+
+    /// Calculate this chunk's data size
+    /// This function uses Byte
     fn size(self: Self) usize {
         const four_cc_size = self.four_cc.len;
-        const data_size: usize = switch (self.data) {
-            .binary => 0,
-            .chunks => blk: {
-                var result: usize = 0;
+        var data_size: usize = 0;
 
-                for (self.data.chunks) |chunk| {
-                    result += chunk.id.len;
-                    result += chunk.size();
-                }
+        for (self.data) |data| {
+            switch (data) {
+                .chunk => {
+                    data_size += data.chunk.id.len; // Chunk ID length
+                    data_size += 4; // Length of the Chunk size itself
+                    data_size += data.chunk.size(); // Chunk's size
+                },
+                .list => {
+                    data_size += data.list.id.len; // List's id length
+                    data_size += 4; // Length of the List size itself
+                    data_size += data.list.size(); // List's size
+                },
+            }
+        }
 
-                break :blk result;
-            },
+        return data_size + four_cc_size;
+    }
+
+    const Data = union(DataTag) {
+        chunk: Chunk,
+        list: ListChunk,
+    };
+
+    const DataTag = enum {
+        chunk,
+        list,
+    };
+};
+
+const ListChunk = struct {
+    const Self = @This();
+
+    id: [4]*const u8 = .{ &'L', &'I', &'S', &'T' },
+    four_cc: [4]*const u8,
+    data: []const Chunk,
+
+    /// Calculate this chunk's data size
+    /// This function uses Byte
+    fn size(self: Self) usize {
+        const four_cc_size = self.four_cc.len;
+        const data_size: usize = blk: {
+            var result: usize = 0;
+
+            for (self.data) |chunk| {
+                result += chunk.size();
+            }
+
+            break :blk result;
         };
 
         return four_cc_size + data_size;
     }
-
-    const Data = union(DataTag) {
-        binary: []const u8,
-        chunks: []const Chunk,
-    };
-
-    const DataTag = enum {
-        binary,
-        chunks,
-    };
 };
 
+test "minimal_list" {
+    const list: ListChunk = ListChunk{
+        .four_cc = .{ &'I', &'N', &'F', &'O' },
+        .data = &.{},
+    };
+
+    const riff: RIFFChunk = RIFFChunk{
+        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .data = &.{
+            RIFFChunk.Data{ .list = list },
+        },
+    };
+
+    try std.testing.expectEqual(riff.size(), 16);
+}
+
 test "minimal_riff" {
-    const riff: Chunk = Chunk{
-        .id = "RIFF",
-        .four_cc = "WAVE",
-        .data = Chunk.Data{ .binary = "" },
+    const riff: RIFFChunk = RIFFChunk{
+        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .data = &.{},
     };
 
     try std.testing.expectEqual(riff.size(), 4);
 }
 
-test "miminal_list_chunk" {
-    const list: Chunk = Chunk{
-        .id = "LIST",
-        .four_cc = "INFO",
-        .data = Chunk.Data{ .chunks = &.{} },
-    };
-    const riff: Chunk = Chunk{
-        .id = "RIFF",
-        .four_cc = "WAVE",
-        .data = Chunk.Data{ .chunks = &.{
-            list,
-        } },
-    };
-
-    try std.testing.expectEqual(riff.size(), 12);
-}
-
 test "riff" {
     const data: Chunk = Chunk{
-        .id = "data",
-        .four_cc = "",
-        .data = Chunk.Data{ .binary = "" },
+        .id = .{ &'d', &'a', &'t', &'a' },
+        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .data = &.{},
     };
     const info: Chunk = Chunk{
-        .id = "info",
-        .four_cc = "hoge",
-        .data = Chunk.Data{ .binary = &.{
-            0x00,
-        } },
+        .id = .{ &'i', &'n', &'f', &'o' },
+        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .data = &.{},
     };
 
-    const riff: Chunk = Chunk{
-        .id = "RIFF",
-        .four_cc = "WAVE",
-        .data = Chunk.Data{
-            .chunks = &.{
-                data,
-                info,
-            },
+    const riff: RIFFChunk = RIFFChunk{
+        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .data = &.{
+            RIFFChunk.Data{ .chunk = data },
+            RIFFChunk.Data{ .chunk = info },
         },
     };
 
-    try std.testing.expectEqual(riff.size(), 16);
+    try std.testing.expectEqual(riff.size(), 28);
+}
+
+test "more_complex_riff" {
+    // .id <- 4
+    // .four_cc <- 4
+    // .size <- 4
+    // .data <- 0
+    // data => 12
+    const list: ListChunk = ListChunk{
+        .four_cc = .{ &'I', &'N', &'F', &'O' },
+        .data = &.{},
+    };
+
+    // .id <- 4
+    // .four_cc <- 4
+    // .size <- 4
+    // .data <- 12
+    // data => 28
+    const data: Chunk = Chunk{
+        .id = .{ &'d', &'a', &'t', &'a' },
+        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .data = "EXAMPLE_DATA", // 12 bytes
+    };
+
+    // .id <- 4
+    // .four_cc <- 4
+    // .size <- 4
+    // .data <- 20
+    // data => 36
+    const info: Chunk = Chunk{
+        .id = .{ &'i', &'n', &'f', &'o' },
+        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .data = "THIS IS EXAMPLE DATA", // 20 bytes
+    };
+
+    // .four_cc <- 4
+    // riff.size() => 12 + 28 + 36 + 4
+    // =>
+    const riff: RIFFChunk = RIFFChunk{
+        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .data = &.{
+            RIFFChunk.Data{ .list = list },
+            RIFFChunk.Data{ .chunk = data },
+            RIFFChunk.Data{ .chunk = info },
+        },
+    };
+
+    try std.testing.expectEqual(riff.size(), 72);
 }
