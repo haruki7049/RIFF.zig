@@ -1,90 +1,93 @@
 const std = @import("std");
 
-const RIFFHeader = struct {
-    id: [4]u8 = .{ 'R', 'I', 'F', 'F' },
-    file_size: u32,
-    format: [4]u8,
-
-    pub fn write(self: *const RIFFHeader, writer: anytype) !void {
-        const file_size: []u8 = undefined;
-        std.mem.writeInt([]const u8, file_size, self.file_size, .little);
-
-        try writer.writeAll(&self.id);
-        try writer.writeAll(file_size);
-        try writer.writeAll(&self.format);
-    }
-};
-
 const Chunk = struct {
-    id: [4]u8,
-    size: u32,
-    data: []const u8,
+    const Self = @This();
 
-    pub fn write(self: *const Chunk, writer: anytype) !void {
-        try writer.writeAll(&self.id);
-        try writer.writeIntLittle(u32, self.size);
-        try writer.writeAll(self.data);
+    id: []const u8,
+    four_cc: []const u8,
+    data: Data,
+
+    fn size(self: Self) usize {
+        const four_cc_size = self.four_cc.len;
+        const data_size: usize = switch (self.data) {
+            .binary => 0,
+            .chunks => blk: {
+                var result: usize = 0;
+
+                for (self.data.chunks) |chunk| {
+                    result += chunk.id.len;
+                    result += chunk.size();
+                }
+
+                break :blk result;
+            },
+        };
+
+        return four_cc_size + data_size;
     }
+
+    const Data = union(DataTag) {
+        binary: []const u8,
+        chunks: []const Chunk,
+    };
+
+    const DataTag = enum {
+        binary,
+        chunks,
+    };
 };
 
-const ListChunk = struct {
-    id: [4]u8 = .{ 'L', 'I', 'S', 'T' },
-    size: u32,
-    list_type: [4]u8,
-    sub_chunks: []const Chunk,
-    sub_lists: []const ListChunk, // Support nested LIST chunks
-
-    pub fn write(self: *const ListChunk, writer: anytype) !void {
-        try writer.writeAll(&self.id);
-        try writer.writeIntLittle(u32, self.size);
-        try writer.writeAll(&self.list_type);
-
-        for (self.sub_chunks) |chunk| {
-            try chunk.write(writer);
-        }
-
-        for (self.sub_lists) |list| {
-            try list.write(writer);
-        }
-    }
-};
-
-test "Test" {
-    const file = try std.fs.cwd().createFile("nested_riff.riff", .{});
-    defer file.close();
-    const writer = file.writer();
-
-    // RIFF Header
-    const riff_header = RIFFHeader{
-        .file_size = 4 + 8 + 4, // Placeholder size
-        .format = .{ 'W', 'A', 'V', 'E' },
-    };
-    try riff_header.write(writer);
-
-    // Sub-chunks inside LIST
-    const sub_chunk_1 = Chunk{
-        .id = .{ 'I', 'N', 'F', 'O' },
-        .size = 4,
-        .data = "Test",
+test "minimal_riff" {
+    const riff: Chunk = Chunk{
+        .id = "RIFF",
+        .four_cc = "WAVE",
+        .data = Chunk.Data{ .binary = "" },
     };
 
-    // Nested LIST chunk (inside another LIST)
-    const nested_list = ListChunk{
-        .size = 4 + 8 + sub_chunk_1.size, // LIST type + sub-chunk
-        .list_type = .{ 'D', 'A', 'T', 'A' },
-        .sub_chunks = &[_]Chunk{sub_chunk_1},
-        .sub_lists = &[_]ListChunk{}, // No deeper nesting here
+    try std.testing.expectEqual(riff.size(), 4);
+}
+
+test "miminal_list_chunk" {
+    const list: Chunk = Chunk{
+        .id = "LIST",
+        .four_cc = "INFO",
+        .data = Chunk.Data{ .chunks = &.{} },
+    };
+    const riff: Chunk = Chunk{
+        .id = "RIFF",
+        .four_cc = "WAVE",
+        .data = Chunk.Data{ .chunks = &.{
+            list,
+        } },
     };
 
-    // Main LIST chunk (contains nested LIST)
-    const main_list = ListChunk{
-        .size = 4 + 8 + nested_list.size,
-        .list_type = .{ 'I', 'N', 'F', 'O' },
-        .sub_chunks = &[_]Chunk{},
-        .sub_lists = &[_]ListChunk{nested_list},
+    try std.testing.expectEqual(riff.size(), 12);
+}
+
+test "riff" {
+    const data: Chunk = Chunk{
+        .id = "data",
+        .four_cc = "",
+        .data = Chunk.Data{ .binary = "" },
+    };
+    const info: Chunk = Chunk{
+        .id = "info",
+        .four_cc = "hoge",
+        .data = Chunk.Data{ .binary = &.{
+            0x00,
+        } },
     };
 
-    try main_list.write(writer);
+    const riff: Chunk = Chunk{
+        .id = "RIFF",
+        .four_cc = "WAVE",
+        .data = Chunk.Data{
+            .chunks = &.{
+                data,
+                info,
+            },
+        },
+    };
 
-    std.debug.print("Nested RIFF file created!\n", .{});
+    try std.testing.expectEqual(riff.size(), 16);
 }
