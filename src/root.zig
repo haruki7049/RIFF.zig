@@ -138,7 +138,7 @@ pub const ListChunk = struct {
 
     id: [4]u8 = .{ 'L', 'I', 'S', 'T' },
     four_cc: [4]u8,
-    data: []Chunk,
+    data: []const Chunk,
 
     /// Calculate this list's data size
     /// This function uses Byte
@@ -148,6 +148,8 @@ pub const ListChunk = struct {
             var result: usize = 0;
 
             for (self.data) |chunk| {
+                result += 4; // Chunk's ID
+                result += 4; // Chunk's Size
                 result += chunk.size();
             }
 
@@ -184,7 +186,7 @@ pub const ListChunk = struct {
         return result.toOwnedSlice();
     }
 
-    fn convert_chunks(chunks: []Chunk, allocator: Allocator) ![]u8 {
+    fn convert_chunks(chunks: []const Chunk, allocator: Allocator) ![]u8 {
         var result = std.ArrayList(u8).init(allocator);
         defer result.deinit();
 

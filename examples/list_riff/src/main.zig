@@ -1,6 +1,7 @@
 const std = @import("std");
 const riff_zig = @import("riff_zig");
 const RIFFChunk = riff_zig.RIFFChunk;
+const ListChunk = riff_zig.ListChunk;
 const Chunk = riff_zig.Chunk;
 
 const data: Chunk = Chunk{
@@ -9,10 +10,17 @@ const data: Chunk = Chunk{
     .data = "EXAMPLE_DATA", // 12 bytes
 };
 
+const list: ListChunk = ListChunk{
+    .four_cc = .{ 'I', 'N', 'F', 'O' },
+    .data = &[_]Chunk{
+        data,
+    },
+};
+
 const riff_chunk: RIFFChunk = RIFFChunk{
     .four_cc = .{ 'W', 'A', 'V', 'E' },
     .data = &[_]RIFFChunk.Data{
-        .{ .chunk = data },
+        .{ .list = list },
     },
 };
 
@@ -27,7 +35,7 @@ pub fn main() !void {
     // std.debug.print("{*}\n", .{bin});
 
     const file = try std.fs.cwd().createFile(
-        "simple.riff",
+        "list.riff",
         .{ .read = true },
     );
     defer file.close();

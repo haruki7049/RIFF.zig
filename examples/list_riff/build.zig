@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("riff_zig", riff_zig.module("riff_zig"));
 
     const exe = b.addExecutable(.{
-        .name = "simple_riff",
+        .name = "list_riff",
         .root_module = exe_mod,
     });
     b.installArtifact(exe);
