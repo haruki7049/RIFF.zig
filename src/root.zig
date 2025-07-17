@@ -134,41 +134,23 @@ test "riff" {
 }
 
 test "more_complex_riff" {
-    // .id <- 4
-    // .four_cc <- 4
-    // .size <- 4
-    // .data <- 0
-    // data => 12
     const list: ListChunk = ListChunk{
         .four_cc = .{ &'I', &'N', &'F', &'O' },
         .data = &.{},
     };
 
-    // .id <- 4
-    // .four_cc <- 4
-    // .size <- 4
-    // .data <- 12
-    // data => 28
     const data: Chunk = Chunk{
         .id = .{ &'d', &'a', &'t', &'a' },
         .four_cc = .{ &' ', &' ', &' ', &' ' },
         .data = "EXAMPLE_DATA", // 12 bytes
     };
 
-    // .id <- 4
-    // .four_cc <- 4
-    // .size <- 4
-    // .data <- 20
-    // data => 36
     const info: Chunk = Chunk{
         .id = .{ &'i', &'n', &'f', &'o' },
         .four_cc = .{ &' ', &' ', &' ', &' ' },
         .data = "THIS IS EXAMPLE DATA", // 20 bytes
     };
 
-    // .four_cc <- 4
-    // riff.size() => 12 + 28 + 36 + 4
-    // =>
     const riff: RIFFChunk = RIFFChunk{
         .four_cc = .{ &'W', &'A', &'V', &'E' },
         .data = &.{
