@@ -25,20 +25,35 @@
         { pkgs, ... }:
         {
           treefmt = {
-            projectRootFile = "flake.nix";
+            projectRootFile = ".git/config";
+
+            # Nix
             programs.nixfmt.enable = true;
-            programs.zig.enable = true;
+
+            # Rust
+            programs.rustfmt.enable = true;
+
+            # TOML
+            programs.taplo.enable = true;
+
+            # GitHub Actions
+            programs.actionlint.enable = true;
+
+            # Markdown
             programs.mdformat.enable = true;
-            settings.excludes = [
-              "LICENSE"
-              ".gitignore"
-              "flake.lock"
-            ];
+
+            # ShellScript
+            programs.shellcheck.enable = true;
+            programs.shfmt.enable = true;
           };
 
           devShells.default = pkgs.mkShell {
             packages = [
-              pkgs.zig_0_13
+              # Zig
+              pkgs.zig_0_14
+              pkgs.zls
+
+              # Nix
               pkgs.nil
             ];
           };
