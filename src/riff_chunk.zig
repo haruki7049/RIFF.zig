@@ -32,7 +32,7 @@ pub fn size(self: Self) usize {
     return data_size + four_cc_size;
 }
 
-fn convert_size(_: Self, value: usize) [4]u8 {
+fn convert_size(value: usize) [4]u8 {
     return [4]u8{
         @intCast(value & 0xFF),
         @intCast((value >> 8) & 0xFF),
@@ -41,7 +41,7 @@ fn convert_size(_: Self, value: usize) [4]u8 {
     };
 }
 
-fn convert_data(_: Self, values: []const Self.Data, allocator: Allocator) ![]u8 {
+fn convert_data(values: []const Self.Data, allocator: Allocator) ![]u8 {
     var result = std.ArrayList(u8).init(allocator);
     defer result.deinit();
 

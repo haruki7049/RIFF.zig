@@ -32,7 +32,7 @@ fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     return result.toOwnedSlice();
 }
 
-fn convert_size(_: Self, value: usize) [4]u8 {
+fn convert_size(value: usize) [4]u8 {
     return [4]u8{
         @intCast(value & 0xFF),
         @intCast((value >> 8) & 0xFF),

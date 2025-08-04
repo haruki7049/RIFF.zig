@@ -26,7 +26,7 @@ pub fn size(self: Self) usize {
     return four_cc_size + data_size;
 }
 
-fn convert_size(_: Self, value: usize) [4]u8 {
+fn convert_size(value: usize) [4]u8 {
     return [4]u8{
         @intCast(value & 0xFF),
         @intCast((value >> 8) & 0xFF),
