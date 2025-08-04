@@ -202,12 +202,12 @@ pub const ListChunk = struct {
 
 test "minimal_list" {
     const list: ListChunk = ListChunk{
-        .four_cc = .{ &'I', &'N', &'F', &'O' },
+        .four_cc = .{ 'I', 'N', 'F', 'O' },
         .data = &.{},
     };
 
     const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .four_cc = .{ 'W', 'A', 'V', 'E' },
         .data = &.{
             RIFFChunk.Data{ .list = list },
         },
@@ -218,7 +218,7 @@ test "minimal_list" {
 
 test "minimal_riff" {
     const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .four_cc = .{ 'W', 'A', 'V', 'E' },
         .data = &.{},
     };
 
@@ -227,18 +227,18 @@ test "minimal_riff" {
 
 test "riff" {
     const data: Chunk = Chunk{
-        .id = .{ &'d', &'a', &'t', &'a' },
-        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .id = .{ 'd', 'a', 't', 'a' },
+        .four_cc = .{ ' ', ' ', ' ', ' ' },
         .data = &.{},
     };
     const info: Chunk = Chunk{
-        .id = .{ &'i', &'n', &'f', &'o' },
-        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .id = .{ 'i', 'n', 'f', 'o' },
+        .four_cc = .{ ' ', ' ', ' ', ' ' },
         .data = &.{},
     };
 
     const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .four_cc = .{ 'W', 'A', 'V', 'E' },
         .data = &.{
             RIFFChunk.Data{ .chunk = data },
             RIFFChunk.Data{ .chunk = info },
@@ -250,24 +250,24 @@ test "riff" {
 
 test "more_complex_riff" {
     const list: ListChunk = ListChunk{
-        .four_cc = .{ &'I', &'N', &'F', &'O' },
+        .four_cc = .{ 'I', 'N', 'F', 'O' },
         .data = &.{},
     };
 
     const data: Chunk = Chunk{
-        .id = .{ &'d', &'a', &'t', &'a' },
-        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .id = .{ 'd', 'a', 't', 'a' },
+        .four_cc = .{ ' ', ' ', ' ', ' ' },
         .data = "EXAMPLE_DATA", // 12 bytes
     };
 
     const info: Chunk = Chunk{
-        .id = .{ &'i', &'n', &'f', &'o' },
-        .four_cc = .{ &' ', &' ', &' ', &' ' },
+        .id = .{ 'i', 'n', 'f', 'o' },
+        .four_cc = .{ ' ', ' ', ' ', ' ' },
         .data = "THIS IS EXAMPLE DATA", // 20 bytes
     };
 
     const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ &'W', &'A', &'V', &'E' },
+        .four_cc = .{ 'W', 'A', 'V', 'E' },
         .data = &.{
             RIFFChunk.Data{ .list = list },
             RIFFChunk.Data{ .chunk = data },
