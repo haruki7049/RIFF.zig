@@ -63,9 +63,9 @@ pub fn to_binary(
     allocator: std.mem.Allocator,
 ) ![]const u8 {
     const id_bin: []const u8 = self.id[0..];
-    const size_bin: []const u8 = &self.convert_size(self.size());
+    const size_bin: []const u8 = &convert_size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
-    const data_bin: []const u8 = try self.convert_data(self.data, allocator);
+    const data_bin: []const u8 = try convert_data(self.data, allocator);
     defer allocator.free(data_bin);
 
     var result = std.ArrayList(u8).init(allocator);

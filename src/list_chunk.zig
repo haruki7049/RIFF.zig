@@ -35,9 +35,9 @@ fn convert_size(value: usize) [4]u8 {
     };
 }
 
-fn to_binary(self: Self, allocator: Allocator) ![]u8 {
+pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     const id_bin: []const u8 = self.id[0..];
-    const size_bin: [4]u8 = self.convert_size(self.size());
+    const size_bin: [4]u8 = convert_size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
     const data_bin: []const u8 = try convert_chunks(self.data[0..], allocator);
     defer allocator.free(data_bin);

@@ -15,9 +15,9 @@ pub fn size(self: Self) usize {
     return four_cc_size + data_size;
 }
 
-fn to_binary(self: Self, allocator: Allocator) ![]u8 {
+pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     const id_bin: []const u8 = self.id[0..];
-    const size_bin = self.convert_size(self.size());
+    const size_bin = convert_size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
     const data_bin: []const u8 = self.data;
 
