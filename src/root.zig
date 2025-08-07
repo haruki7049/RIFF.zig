@@ -5,6 +5,45 @@ pub const Chunk = @import("./chunk.zig");
 pub const RIFFChunk = @import("./riff_chunk.zig");
 pub const ListChunk = @import("./list_chunk.zig");
 
+pub const ToBinary = struct {
+    pub fn size(value: usize) [4]u8 {
+        return [4]u8{
+            @intCast(value & 0xFF),
+            @intCast((value >> 8) & 0xFF),
+            @intCast((value >> 16) & 0xFF),
+            @intCast((value >> 24) & 0xFF),
+        };
+    }
+
+    pub fn data(comptime T: type, self: T, allocator: Allocator) ![]u8 {
+        var result = std.ArrayList(u8).init(allocator);
+        defer result.deinit();
+
+        const data_type: type = @FieldType(T, "data");
+
+        if (data_type == []const RIFFChunk.Data) {
+            for (self.data) |value| {
+                const binary = switch (value) {
+                    .chunk => try value.chunk.to_binary(allocator),
+                    .list => try value.list.to_binary(allocator),
+                };
+
+                try result.appendSlice(binary);
+                allocator.free(binary);
+            }
+        } else if (data_type == []const Chunk) {
+
+            for (self.data) |chunk| {
+                const binary = try chunk.to_binary(allocator);
+                try result.appendSlice(binary);
+                allocator.free(binary);
+            }
+        }
+
+        return result.toOwnedSlice();
+    }
+};
+
 test "minimal_list" {
     const list: ListChunk = ListChunk{
         .four_cc = .{ 'I', 'N', 'F', 'O' },

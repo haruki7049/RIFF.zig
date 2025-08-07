@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Self = @This();
+const project_root = @import("./root.zig");
+const ToBinary = project_root.ToBinary;
 
 id: [4]u8,
 four_cc: [4]u8,
@@ -17,7 +19,7 @@ pub fn size(self: Self) usize {
 
 pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     const id_bin: []const u8 = self.id[0..];
-    const size_bin = convert_size(self.size());
+    const size_bin = ToBinary.size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
     const data_bin: []const u8 = self.data;
 
@@ -30,13 +32,4 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     try result.appendSlice(data_bin);
 
     return result.toOwnedSlice();
-}
-
-fn convert_size(value: usize) [4]u8 {
-    return [4]u8{
-        @intCast(value & 0xFF),
-        @intCast((value >> 8) & 0xFF),
-        @intCast((value >> 16) & 0xFF),
-        @intCast((value >> 24) & 0xFF),
-    };
 }
