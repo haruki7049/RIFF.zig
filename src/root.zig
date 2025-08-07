@@ -32,12 +32,13 @@ pub const ToBinary = struct {
                 allocator.free(binary);
             }
         } else if (data_type == []const Chunk) {
-
             for (self.data) |chunk| {
                 const binary = try chunk.to_binary(allocator);
                 try result.appendSlice(binary);
                 allocator.free(binary);
             }
+        } else {
+            unreachable;
         }
 
         return result.toOwnedSlice();
