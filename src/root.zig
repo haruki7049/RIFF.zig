@@ -6,7 +6,9 @@ pub const Chunk = @import("./chunk.zig");
 pub const RIFFChunk = @import("./riff_chunk.zig");
 pub const ListChunk = @import("./list_chunk.zig");
 
+/// A tool set to convert RIFFChunk and ListChunk to binary
 pub const ToBinary = struct {
+    /// Converts usize to [4]u8, in order to use in binary's size part
     pub fn size(value: usize) [4]u8 {
         return [4]u8{
             @intCast(value & 0xFF),
@@ -16,6 +18,7 @@ pub const ToBinary = struct {
         };
     }
 
+    /// Converts RIFFChunk or ListChunk to []u8, in order to use in binary's data part
     pub fn data(comptime T: type, self: T, allocator: Allocator) ![]u8 {
         var result = std.ArrayList(u8).init(allocator);
         defer result.deinit();
@@ -28,15 +31,16 @@ pub const ToBinary = struct {
                     .chunk => try value.chunk.to_binary(allocator),
                     .list => try value.list.to_binary(allocator),
                 };
+                defer allocator.free(binary);
 
                 try result.appendSlice(binary);
-                allocator.free(binary);
             }
         } else if (data_type == []const Chunk) {
             for (self.data) |chunk| {
                 const binary = try chunk.to_binary(allocator);
+                defer allocator.free(binary);
+
                 try result.appendSlice(binary);
-                allocator.free(binary);
             }
         } else {
             unreachable;
@@ -46,6 +50,7 @@ pub const ToBinary = struct {
     }
 };
 
+/// A tool set to convert binary to RIFFChunk or ListChunk
 pub const FromBinary = struct {
     pub fn size(value: [4]u8) usize {
         const first: u8 = value[0];
@@ -58,8 +63,6 @@ pub const FromBinary = struct {
 
     /// This function is used by RIFFChunk & ListChunk
     pub fn data(comptime T: type, input: []const u8, allocator: Allocator) !@FieldType(T, "data") {
-        std.debug.print("input: {any}\n", .{input});
-
         const data_type_info = @typeInfo(@FieldType(T, "data"));
 
         var result = ArrayList(data_type_info.pointer.child).init(allocator);
@@ -70,7 +73,7 @@ pub const FromBinary = struct {
 
         // const id_bin: [4]u8 = input[0..4].*;
         // const four_cc_bin: [4]u8 = input[8..12].*;
-        const data_bin: []const u8 = input[12..];
+        // const data_bin: []const u8 = input[12..];
 
         //if (!std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }) and !std.mem.eql(u8, &id_bin, &[_]u8{ 'L', 'I', 'S', 'T' })) {
         //    const chunk: T = T{
@@ -82,6 +85,9 @@ pub const FromBinary = struct {
         //}
 
         if (data_type_info.pointer.child == RIFFChunk.Data) {
+            const data_list: []const RIFFChunk.Data = FromBinary.to_data(input, allocator);
+            try result.appendSlice(data_list);
+
             //for (self.data) |value| {
             //    const binary = switch (value) {
             //        .chunk => try value.chunk.to_binary(allocator),
@@ -94,7 +100,9 @@ pub const FromBinary = struct {
 
             @panic("TODO with RIFFChunk.Data");
         } else if (data_type_info.pointer.child == Chunk) {
-            const chunks: []const Chunk = FromBinary.to_chunks(data_bin);
+            const chunks: []const Chunk = try FromBinary.to_chunks(input, allocator);
+            defer allocator.free(chunks);
+
             try result.appendSlice(chunks);
         } else {
             unreachable;
@@ -103,11 +111,49 @@ pub const FromBinary = struct {
         return result.toOwnedSlice();
     }
 
-    fn to_chunks(input: []const u8) []const Chunk {
-        std.debug.print("FromBinary.to_chunks(): {any}\n", .{input});
+    fn to_chunks(
+        input: []const u8,
+        allocator: Allocator,
+    ) ![]const Chunk {
+        var result = ArrayList(Chunk).init(allocator);
+        defer result.deinit();
+
+        const id_bin: [4]u8 = const_to_mut(input[0..4]);
+        const size_bin: [4]u8 = const_to_mut(input[4..8]);
+        const local_size: usize = FromBinary.size(size_bin);
+
+        const four_cc_bin: [4]u8 = const_to_mut(input[8..12]);
+        const data_len = local_size - 4;
+        const data_bin: []const u8 = input[12 .. 12 + data_len];
+
+        const chunk: Chunk = Chunk{
+            .id = id_bin,
+            .four_cc = four_cc_bin,
+            .data = data_bin,
+        };
+
+        try result.append(chunk);
+
+        return result.toOwnedSlice();
+    }
+
+    fn const_to_mut(slice: []const u8) [4]u8 {
+        if (slice.len != 4) {
+            std.debug.print("In FromBinary.const_to_mut()    slice: {any}", .{slice});
+            std.debug.print("In FromBinary.const_to_mut()    slice.len: {d}", .{slice.len});
+            @panic("slice length must be 4");
+        }
+
+        var result: [4]u8 = undefined;
+        @memcpy(&result, slice);
+        return result;
+    }
+
+    fn to_data(input: []const u8) []const RIFFChunk.Data {
+        std.debug.print("In FromBinary.to_data()    input: {any}\n", .{input});
 
         if (input.len < 12)
-            return &[_]Chunk{};
+            return &[_]RIFFChunk.Data{};
 
         @panic("TODO");
     }
