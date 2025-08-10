@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Self = @This();
 const project_root = @import("./root.zig");
@@ -31,15 +32,18 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
     try result.appendSlice(four_cc_bin);
     try result.appendSlice(data_bin);
 
-    return result.items;
+    return result.toOwnedSlice();
 }
 
-// test "to_binary" {
-//     const chunk: Self = Self{
-//         .id = .{ 'i', 'n', 'f', 'o' },
-//         .four_cc = .{ ' ', ' ', ' ', ' ' },
-//         .data = "THIS IS EXAMPLE DATA",
-//     };
+test "to_binary" {
+    const allocator = testing.allocator;
+    const info_chunk: Self = Self{
+        .id = .{ 'i', 'n', 'f', 'o' },
+        .four_cc = .{ ' ', ' ', ' ', ' ' },
+        .data = "THIS IS EXAMPLE DATA",
+    };
+    const info_chunk_data: []const u8 = try info_chunk.to_binary(allocator);
+    defer allocator.free(info_chunk_data);
 
-//     const chunk_data: []const u8 = chunk.to_binary();
-// }
+    try testing.expectEqualStrings(info_chunk_data, @embedFile("./riff_files/only_chunk/info.riff"));
+}
