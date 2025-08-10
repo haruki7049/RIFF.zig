@@ -6,6 +6,7 @@ const Self = @This();
 
 const project_root = @import("./root.zig");
 const ToBinary = project_root.ToBinary;
+const FromBinary = project_root.FromBinary;
 
 id: [4]u8 = .{ 'L', 'I', 'S', 'T' },
 four_cc: [4]u8,
@@ -48,6 +49,27 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     return result.toOwnedSlice();
 }
 
+pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
+    const id: [4]u8 = input[0..4].*;
+    const size_bin: [4]u8 = input[4..8].*;
+    const four_cc: [4]u8 = input[8..12].*;
+    const data: []const Chunk = try FromBinary.data(Chunk, input[12..], allocator);
+
+    const result: Self = Self{
+        .four_cc = four_cc,
+        .data = data,
+    };
+
+    // std.debug.print("size_bin: {d}\n", .{size_bin});
+    // std.debug.print("result.size(): {d}\n", .{result.size()});
+    // std.debug.print("FromBinary.size(size_bin): {d}\n", .{FromBinary.size(size_bin)});
+
+    std.debug.assert(std.mem.eql(u8, &id, &[_]u8{ 'L', 'I', 'S', 'T' }));
+    std.debug.assert(result.size() == FromBinary.size(size_bin));
+
+    return result;
+}
+
 test "size" {
     const list_chunk: Self = Self{
         .four_cc = .{ 'I', 'N', 'F', 'O' },
@@ -71,3 +93,47 @@ test "to_binary" {
         return error.TestUnexpectedResult;
     };
 }
+
+test "from_binary list_with_info" {
+    const allocator = testing.allocator;
+    const list_with_info_data: []const u8 = @embedFile("./riff_files/list_chunk/list_with_info.riff");
+    const list_with_info_result: Self = try Self.from_binary(list_with_info_data, allocator);
+    defer allocator.free(list_with_info_result.data);
+
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.id, &[_]u8{ 'L', 'I', 'S', 'T' }));
+    try testing.expectEqual(list_with_info_result.size(), 16);
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.data[0].id, &[_]u8{ 'i', 'n', 'f', 'o' }));
+    try testing.expectEqual(list_with_info_result.data[0].size(), 4);
+    try testing.expectEqualStrings(&list_with_info_result.data[0].four_cc, &[_]u8{ 'f', 'm', 't', ' ' });
+    try testing.expectEqualStrings(list_with_info_result.data[0].data, "");
+}
+
+test "from_binary list_with_data" {
+    const allocator = testing.allocator;
+    const list_with_info_data: []const u8 = @embedFile("./riff_files/list_chunk/list_with_data.riff");
+    const list_with_info_result: Self = try Self.from_binary(list_with_info_data, allocator);
+    defer allocator.free(list_with_info_result.data);
+
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.id, &[_]u8{ 'L', 'I', 'S', 'T' }));
+    try testing.expectEqual(list_with_info_result.size(), 16);
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
+    try testing.expect(std.mem.eql(u8, &list_with_info_result.data[0].id, &[_]u8{ 'd', 'a', 't', 'a' }));
+    try testing.expectEqual(list_with_info_result.data[0].size(), 4);
+    try testing.expectEqualStrings(&list_with_info_result.data[0].four_cc, &[_]u8{ 'f', 'm', 't', ' ' });
+    try testing.expectEqualStrings(list_with_info_result.data[0].data, "");
+}
+
+// test "from_binary only_list_chunk" {
+//     const allocator = testing.allocator;
+//     const only_list_chunk_data: []const u8 = @embedFile("./riff_files/only_list_chunk/only_list.riff");
+//     const only_list_chunk_result: Self = try Self.from_binary(only_list_chunk_data, allocator);
+//     defer allocator.free(only_list_chunk_result.data);
+
+//     std.debug.print("In from_binary only_list_chunk    only_list_chunk_result.size(): {d}\n", .{only_list_chunk_result.size()});
+
+//     try testing.expect(std.mem.eql(u8, &only_list_chunk_result.id, &[_]u8{ 'L', 'I', 'S', 'T' }));
+//     try testing.expectEqual(only_list_chunk_result.size(), 4);
+//     try testing.expect(std.mem.eql(u8, &only_list_chunk_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
+//     try testing.expectEqual(only_list_chunk_result.data, &[_]Chunk{});
+// }

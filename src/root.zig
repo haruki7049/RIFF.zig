@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 pub const Chunk = @import("./chunk.zig");
 pub const RIFFChunk = @import("./riff_chunk.zig");
@@ -53,6 +54,27 @@ pub const FromBinary = struct {
         const fourth: u8 = value[3] << 6;
 
         return first + second + third + fourth;
+    }
+
+    pub fn data(comptime T: type, input: []const u8, allocator: Allocator) ![]const T {
+        var result = ArrayList(T).init(allocator);
+        defer result.deinit();
+
+        const id_bin: [4]u8 = input[0..4].*;
+        // const size_bin: [4]u8 = input[4..8].*;
+        const four_cc_bin: [4]u8 = input[8..12].*;
+        const data_bin: []const u8 = input[12..];
+
+        if (!std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }) and !std.mem.eql(u8, &id_bin, &[_]u8{ 'L', 'I', 'S', 'T' })) {
+            const chunk: T = T{
+                .id = id_bin,
+                .four_cc = four_cc_bin,
+                .data = data_bin,
+            };
+            try result.append(chunk);
+        }
+
+        return result.toOwnedSlice();
     }
 };
 
