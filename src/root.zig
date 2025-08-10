@@ -97,8 +97,6 @@ pub const FromBinary = struct {
         const data_len = local_size - 4;
         const data_bin: []const u8 = input[12 .. 12 + data_len];
 
-        std.debug.print("{s}\n", .{id_bin});
-
         const chunk: Chunk = Chunk{
             .id = id_bin,
             .four_cc = four_cc_bin,
