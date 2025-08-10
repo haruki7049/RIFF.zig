@@ -85,8 +85,11 @@ test "to_binary" {
     const only_riff_data: []const u8 = try only_riff.to_binary(allocator);
     defer allocator.free(only_riff_data);
 
-    testing.expect(std.mem.eql(u8, only_riff_data, @embedFile("./riff_files/only_riff_chunk/only_riff.riff"))) catch {
+    const test_data: []const u8 = @embedFile("./riff_files/only_riff_chunk/only_riff.riff");
+
+    testing.expect(std.mem.eql(u8, only_riff_data, test_data)) catch {
         std.debug.print("only_riff_data: {x}\n", .{only_riff_data});
+        std.debug.print("test_data: {x}\n", .{test_data});
         return error.TestUnexpectedResult;
     };
 }
