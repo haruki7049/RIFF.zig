@@ -56,27 +56,60 @@ pub const FromBinary = struct {
         return first + second + third + fourth;
     }
 
-    pub fn data(comptime T: type, input: []const u8, allocator: Allocator) ![]const T {
-        var result = ArrayList(T).init(allocator);
+    /// This function is used by RIFFChunk & ListChunk
+    pub fn data(comptime T: type, input: []const u8, allocator: Allocator) !@FieldType(T, "data") {
+        std.debug.print("input: {any}\n", .{input});
+
+        const data_type_info = @typeInfo(@FieldType(T, "data"));
+
+        var result = ArrayList(data_type_info.pointer.child).init(allocator);
         defer result.deinit();
 
         if (input.len < 12)
             return result.toOwnedSlice();
 
-        const id_bin: [4]u8 = input[0..4].*;
-        const four_cc_bin: [4]u8 = input[8..12].*;
+        // const id_bin: [4]u8 = input[0..4].*;
+        // const four_cc_bin: [4]u8 = input[8..12].*;
         const data_bin: []const u8 = input[12..];
 
-        if (!std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }) and !std.mem.eql(u8, &id_bin, &[_]u8{ 'L', 'I', 'S', 'T' })) {
-            const chunk: T = T{
-                .id = id_bin,
-                .four_cc = four_cc_bin,
-                .data = data_bin,
-            };
-            try result.append(chunk);
+        //if (!std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }) and !std.mem.eql(u8, &id_bin, &[_]u8{ 'L', 'I', 'S', 'T' })) {
+        //    const chunk: T = T{
+        //        .id = id_bin,
+        //        .four_cc = four_cc_bin,
+        //        .data = data_bin,
+        //    };
+        //    try result.append(chunk);
+        //}
+
+        if (data_type_info.pointer.child == RIFFChunk.Data) {
+            //for (self.data) |value| {
+            //    const binary = switch (value) {
+            //        .chunk => try value.chunk.to_binary(allocator),
+            //        .list => try value.list.to_binary(allocator),
+            //    };
+
+            //    try result.appendSlice(binary);
+            //    allocator.free(binary);
+            //}
+
+            @panic("TODO with RIFFChunk.Data");
+        } else if (data_type_info.pointer.child == Chunk) {
+            const chunks: []const Chunk = FromBinary.to_chunks(data_bin);
+            try result.appendSlice(chunks);
+        } else {
+            unreachable;
         }
 
         return result.toOwnedSlice();
+    }
+
+    fn to_chunks(input: []const u8) []const Chunk {
+        std.debug.print("FromBinary.to_chunks(): {any}\n", .{input});
+
+        if (input.len < 12)
+            return &[_]Chunk{};
+
+        @panic("TODO");
     }
 };
 

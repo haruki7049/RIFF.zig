@@ -37,8 +37,6 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
 }
 
 pub fn from_binary(input: []const u8) Self {
-    // std.debug.print("In chunk.zig    input: |{s}|\n", .{input});
-
     const id: [4]u8 = input[0..4].*;
     const size_bin: [4]u8 = input[4..8].*;
     const four_cc: [4]u8 = input[8..12].*;
