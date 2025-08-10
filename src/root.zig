@@ -57,8 +57,13 @@ pub const FromBinary = struct {
     }
 
     pub fn data(comptime T: type, input: []const u8, allocator: Allocator) ![]const T {
+        std.debug.print("input: {any}\n", .{input});
+
         var result = ArrayList(T).init(allocator);
         defer result.deinit();
+
+        if (input.len < 12)
+            return result.toOwnedSlice();
 
         const id_bin: [4]u8 = input[0..4].*;
         // const size_bin: [4]u8 = input[4..8].*;

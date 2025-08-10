@@ -124,16 +124,14 @@ test "from_binary list_with_data" {
     try testing.expectEqualStrings(list_with_info_result.data[0].data, "");
 }
 
-// test "from_binary only_list_chunk" {
-//     const allocator = testing.allocator;
-//     const only_list_chunk_data: []const u8 = @embedFile("./riff_files/only_list_chunk/only_list.riff");
-//     const only_list_chunk_result: Self = try Self.from_binary(only_list_chunk_data, allocator);
-//     defer allocator.free(only_list_chunk_result.data);
+test "from_binary only_list_chunk" {
+    const allocator = testing.allocator;
+    const only_list_chunk_data: []const u8 = @embedFile("./riff_files/only_list_chunk/only_list.riff");
+    const only_list_chunk_result: Self = try Self.from_binary(only_list_chunk_data, allocator);
+    defer allocator.free(only_list_chunk_result.data);
 
-//     std.debug.print("In from_binary only_list_chunk    only_list_chunk_result.size(): {d}\n", .{only_list_chunk_result.size()});
-
-//     try testing.expect(std.mem.eql(u8, &only_list_chunk_result.id, &[_]u8{ 'L', 'I', 'S', 'T' }));
-//     try testing.expectEqual(only_list_chunk_result.size(), 4);
-//     try testing.expect(std.mem.eql(u8, &only_list_chunk_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
-//     try testing.expectEqual(only_list_chunk_result.data, &[_]Chunk{});
-// }
+    try testing.expect(std.mem.eql(u8, &only_list_chunk_result.id, &[_]u8{ 'L', 'I', 'S', 'T' }));
+    try testing.expectEqual(only_list_chunk_result.size(), 4);
+    try testing.expect(std.mem.eql(u8, &only_list_chunk_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
+    try testing.expectEqual(only_list_chunk_result.data, &[_]Chunk{});
+}
