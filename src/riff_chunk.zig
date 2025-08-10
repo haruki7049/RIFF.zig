@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Self = @This();
 const Chunk = @import("./chunk.zig");
@@ -65,3 +66,27 @@ pub const DataTag = enum {
     chunk,
     list,
 };
+
+test "size" {
+    const only_riff_chunk: Self = Self{
+        .four_cc = .{ 'D', 'A', 'T', 'A' },
+        .data = &[_]Data{},
+    };
+
+    try testing.expectEqual(only_riff_chunk.size(), 4);
+}
+
+test "to_binary" {
+    const allocator = testing.allocator;
+    const only_riff: Self = Self{
+        .four_cc = .{ 'D', 'A', 'T', 'A' },
+        .data = &[_]Data{},
+    };
+    const only_riff_data: []const u8 = try only_riff.to_binary(allocator);
+    defer allocator.free(only_riff_data);
+
+    testing.expect(std.mem.eql(u8, only_riff_data, @embedFile("./riff_files/only_riff_chunk/only_riff.riff"))) catch {
+        std.debug.print("only_riff_data: {x}\n", .{only_riff_data});
+        return error.TestUnexpectedResult;
+    };
+}
