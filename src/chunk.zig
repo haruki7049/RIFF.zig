@@ -17,7 +17,7 @@ pub fn size(self: Self) usize {
     return four_cc_size + data_size;
 }
 
-pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
+pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
     const id_bin: []const u8 = self.id[0..];
     const size_bin = ToBinary.size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
@@ -31,5 +31,15 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     try result.appendSlice(four_cc_bin);
     try result.appendSlice(data_bin);
 
-    return result.toOwnedSlice();
+    return result.items;
 }
+
+// test "to_binary" {
+//     const chunk: Self = Self{
+//         .id = .{ 'i', 'n', 'f', 'o' },
+//         .four_cc = .{ ' ', ' ', ' ', ' ' },
+//         .data = "THIS IS EXAMPLE DATA",
+//     };
+
+//     const chunk_data: []const u8 = chunk.to_binary();
+// }
