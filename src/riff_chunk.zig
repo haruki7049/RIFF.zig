@@ -7,6 +7,7 @@ const ListChunk = @import("./list_chunk.zig");
 
 const project_root = @import("./root.zig");
 const ToBinary = project_root.ToBinary;
+const FromBinary = project_root.FromBinary;
 
 id: [4]u8 = .{ 'R', 'I', 'F', 'F' },
 four_cc: [4]u8,
@@ -57,6 +58,22 @@ pub fn to_binary(
     return result.toOwnedSlice();
 }
 
+pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
+    const size_bin: [4]u8 = input[4..8].*;
+    const four_cc_bin: [4]u8 = input[8..12].*;
+    const data: []const Data = try FromBinary.data(Self, input[12..], allocator);
+
+    const result: Self = Self{
+        .four_cc = four_cc_bin,
+        .data = data,
+    };
+
+    std.debug.assert(std.mem.eql(u8, &result.id, &[_]u8{ 'R', 'I', 'F', 'F' }));
+    std.debug.assert(result.size() == FromBinary.size(size_bin));
+
+    return result;
+}
+
 pub const Data = union(enum) {
     chunk: Chunk,
     list: ListChunk,
@@ -87,4 +104,16 @@ test "to_binary" {
         std.debug.print("test_data: {x}\n", .{test_data});
         return error.TestUnexpectedResult;
     };
+}
+
+test "from_binary only_riff_chunk" {
+    const allocator = testing.allocator;
+    const only_riff_data: []const u8 = @embedFile("./riff_files/only_riff_chunk/only_riff.riff");
+    const only_riff_result: Self = try Self.from_binary(only_riff_data, allocator);
+    defer allocator.free(only_riff_result.data);
+
+    try testing.expect(std.mem.eql(u8, &only_riff_result.id, &[_]u8{ 'R', 'I', 'F', 'F' }));
+    try testing.expectEqual(only_riff_result.size(), 4);
+    try testing.expect(std.mem.eql(u8, &only_riff_result.four_cc, &[_]u8{ 'D', 'A', 'T', 'A' }));
+    try testing.expectEqual(only_riff_result.data, &[_]Self.Data{});
 }
