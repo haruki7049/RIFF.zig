@@ -54,7 +54,6 @@ pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
     const size_bin: [4]u8 = input[4..8].*;
     const four_cc: [4]u8 = input[8..12].*;
     const data: []const Chunk = try FromBinary.data(Self, input[12..], allocator);
-    defer allocator.free(data);
 
     const result: Self = Self{
         .four_cc = four_cc,
@@ -101,7 +100,7 @@ test "from_binary list_with_info" {
     try testing.expectEqual(list_with_info_result.size(), 16);
     try testing.expect(std.mem.eql(u8, &list_with_info_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
 
-    try testing.expect(std.mem.eql(u8, &list_with_info_result.data[0].id, &[_]u8{ 'i', 'n', 'f', 'o' }));
+    try testing.expectEqualStrings(&list_with_info_result.data[0].id, &[_]u8{ 'i', 'n', 'f', 'o' });
     try testing.expectEqual(list_with_info_result.data[0].size(), 4);
     try testing.expectEqualStrings(&list_with_info_result.data[0].four_cc, &[_]u8{ 'f', 'm', 't', ' ' });
     try testing.expectEqualStrings(list_with_info_result.data[0].data, "");
@@ -117,7 +116,7 @@ test "from_binary list_with_data" {
     try testing.expectEqual(list_with_info_result.size(), 16);
     try testing.expect(std.mem.eql(u8, &list_with_info_result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
 
-    try testing.expect(std.mem.eql(u8, &list_with_info_result.data[0].id, &[_]u8{ 'd', 'a', 't', 'a' }));
+    try testing.expectEqualStrings(&list_with_info_result.data[0].id, &[_]u8{ 'd', 'a', 't', 'a' });
     try testing.expectEqual(list_with_info_result.data[0].size(), 4);
     try testing.expectEqualStrings(&list_with_info_result.data[0].four_cc, &[_]u8{ 'f', 'm', 't', ' ' });
     try testing.expectEqualStrings(list_with_info_result.data[0].data, "");

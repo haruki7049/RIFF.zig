@@ -71,37 +71,14 @@ pub const FromBinary = struct {
         if (input.len < 12)
             return result.toOwnedSlice();
 
-        // const id_bin: [4]u8 = input[0..4].*;
-        // const four_cc_bin: [4]u8 = input[8..12].*;
-        // const data_bin: []const u8 = input[12..];
-
-        //if (!std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }) and !std.mem.eql(u8, &id_bin, &[_]u8{ 'L', 'I', 'S', 'T' })) {
-        //    const chunk: T = T{
-        //        .id = id_bin,
-        //        .four_cc = four_cc_bin,
-        //        .data = data_bin,
-        //    };
-        //    try result.append(chunk);
-        //}
-
         if (data_type_info.pointer.child == RIFFChunk.Data) {
-            const data_list: []const RIFFChunk.Data = FromBinary.to_data(input, allocator);
-            try result.appendSlice(data_list);
-
-            //for (self.data) |value| {
-            //    const binary = switch (value) {
-            //        .chunk => try value.chunk.to_binary(allocator),
-            //        .list => try value.list.to_binary(allocator),
-            //    };
-
-            //    try result.appendSlice(binary);
-            //    allocator.free(binary);
-            //}
+            // const data_list: []const RIFFChunk.Data = FromBinary.to_data(input, allocator);
+            // try result.appendSlice(data_list);
 
             @panic("TODO with RIFFChunk.Data");
         } else if (data_type_info.pointer.child == Chunk) {
             const chunks: []const Chunk = try FromBinary.to_chunks(input, allocator);
-            defer allocator.free(chunks);
+            // defer allocator.free(chunks);
 
             try result.appendSlice(chunks);
         } else {
@@ -126,6 +103,8 @@ pub const FromBinary = struct {
         const data_len = local_size - 4;
         const data_bin: []const u8 = input[12 .. 12 + data_len];
 
+        std.debug.print("{s}\n", .{id_bin});
+
         const chunk: Chunk = Chunk{
             .id = id_bin,
             .four_cc = four_cc_bin,
@@ -134,7 +113,10 @@ pub const FromBinary = struct {
 
         try result.append(chunk);
 
-        return result.toOwnedSlice();
+        // return result.items;
+        return &[_]Chunk{
+            chunk,
+        };
     }
 
     fn const_to_mut(slice: []const u8) [4]u8 {
