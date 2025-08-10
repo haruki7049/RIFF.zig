@@ -76,7 +76,7 @@ pub const FromBinary = struct {
             defer allocator.free(chunks);
 
             try result.appendSlice(chunks);
-        } else {
+        } else if (data_type_info.pointer.child == RIFFChunk.Data) {} else {
             unreachable;
         }
 

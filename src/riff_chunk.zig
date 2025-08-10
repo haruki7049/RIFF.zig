@@ -59,6 +59,7 @@ pub fn to_binary(
 }
 
 pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
+    const id_bin: [4]u8 = input[0..4].*;
     const size_bin: [4]u8 = input[4..8].*;
     const four_cc_bin: [4]u8 = input[8..12].*;
     const data: []const Data = try FromBinary.data(Self, input[12..], allocator);
@@ -68,7 +69,12 @@ pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
         .data = data,
     };
 
-    std.debug.assert(std.mem.eql(u8, &result.id, &[_]u8{ 'R', 'I', 'F', 'F' }));
+    // std.debug.print("id_bin: {s}\n", .{id_bin});
+    // std.debug.print("size_bin: {any}\n", .{size_bin});
+    // std.debug.print("FromBinary.size(size_bin): {any}\n", .{FromBinary.size(size_bin)});
+    // std.debug.print("result.size(): {any}\n", .{result.size()});
+
+    std.debug.assert(std.mem.eql(u8, &id_bin, &[_]u8{ 'R', 'I', 'F', 'F' }));
     std.debug.assert(result.size() == FromBinary.size(size_bin));
 
     return result;
