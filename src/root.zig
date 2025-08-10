@@ -71,14 +71,9 @@ pub const FromBinary = struct {
         if (input.len < 12)
             return result.toOwnedSlice();
 
-        if (data_type_info.pointer.child == RIFFChunk.Data) {
-            // const data_list: []const RIFFChunk.Data = FromBinary.to_data(input, allocator);
-            // try result.appendSlice(data_list);
-
-            @panic("TODO with RIFFChunk.Data");
-        } else if (data_type_info.pointer.child == Chunk) {
+        if (data_type_info.pointer.child == Chunk) {
             const chunks: []const Chunk = try FromBinary.to_chunks(input, allocator);
-            // defer allocator.free(chunks);
+            defer allocator.free(chunks);
 
             try result.appendSlice(chunks);
         } else {
@@ -93,7 +88,6 @@ pub const FromBinary = struct {
         allocator: Allocator,
     ) ![]const Chunk {
         var result = ArrayList(Chunk).init(allocator);
-        defer result.deinit();
 
         const id_bin: [4]u8 = const_to_mut(input[0..4]);
         const size_bin: [4]u8 = const_to_mut(input[4..8]);
@@ -113,10 +107,7 @@ pub const FromBinary = struct {
 
         try result.append(chunk);
 
-        // return result.items;
-        return &[_]Chunk{
-            chunk,
-        };
+        return result.toOwnedSlice();
     }
 
     fn const_to_mut(slice: []const u8) [4]u8 {
