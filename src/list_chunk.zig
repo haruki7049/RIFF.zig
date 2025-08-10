@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Chunk = @import("./chunk.zig");
 const Self = @This();
@@ -45,4 +46,28 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     try result.appendSlice(data_bin);
 
     return result.toOwnedSlice();
+}
+
+test "size" {
+    const list_chunk: Self = Self{
+        .four_cc = .{ 'I', 'N', 'F', 'O' },
+        .data = &[_]Chunk{},
+    };
+
+    try testing.expectEqual(list_chunk.size(), 4);
+}
+
+test "to_binary" {
+    const allocator = testing.allocator;
+    const list_chunk: Self = Self{
+        .four_cc = .{ 'I', 'N', 'F', 'O' },
+        .data = &[_]Chunk{},
+    };
+    const data: []const u8 = try list_chunk.to_binary(allocator);
+    defer allocator.free(data);
+
+    testing.expect(std.mem.eql(u8, data, @embedFile("./riff_files/only_list_chunk/only_list.riff"))) catch {
+        std.debug.print("data: {x}\n", .{data});
+        return error.TestUnexpectedResult;
+    };
 }

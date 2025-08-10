@@ -45,6 +45,17 @@ pub const ToBinary = struct {
     }
 };
 
+pub const FromBinary = struct {
+    pub fn size(value: [4]u8) usize {
+        const first: u8 = value[0];
+        const second: u8 = value[1] << 2;
+        const third: u8 = value[2] << 4;
+        const fourth: u8 = value[3] << 6;
+
+        return first + second + third + fourth;
+    }
+};
+
 test "minimal_list" {
     const list: ListChunk = ListChunk{
         .four_cc = .{ 'I', 'N', 'F', 'O' },

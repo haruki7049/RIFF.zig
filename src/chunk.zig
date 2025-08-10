@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const Self = @This();
 const project_root = @import("./root.zig");
 const ToBinary = project_root.ToBinary;
+const FromBinary = project_root.FromBinary;
 
 id: [4]u8,
 four_cc: [4]u8,
@@ -35,6 +36,25 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
     return result.toOwnedSlice();
 }
 
+pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
+    _ = allocator;
+
+    const id: [4]u8 = input[0..4].*;
+    const size_bin: [4]u8 = input[4..8].*;
+    const four_cc: [4]u8 = input[8..12].*;
+    const data: []const u8 = input[12..];
+
+    const result: Self = Self{
+        .id = id,
+        .four_cc = four_cc,
+        .data = data,
+    };
+
+    std.debug.assert(result.size() == FromBinary.size(size_bin));
+
+    return result;
+}
+
 test "size" {
     const info_chunk: Self = Self{
         .id = .{ 'i', 'n', 'f', 'o' },
@@ -62,4 +82,15 @@ test "to_binary" {
         std.debug.print("test_data: {x}\n", .{test_data});
         return error.TestUnexpectedResult;
     };
+}
+
+test "from_binary" {
+    const allocator = testing.allocator;
+    const info_chunk_data: []const u8 = @embedFile("./riff_files/only_chunk/info.riff");
+    const result: Self = try Self.from_binary(info_chunk_data, allocator);
+
+    try testing.expect(std.mem.eql(u8, &result.id, &[_]u8{ 'i', 'n', 'f', 'o' }));
+    try testing.expectEqual(result.size(), 24);
+    try testing.expect(std.mem.eql(u8, &result.four_cc, &[_]u8{ 'I', 'N', 'F', 'O' }));
+    try testing.expect(std.mem.eql(u8, result.data, "THIS IS EXAMPLE DATA"));
 }
