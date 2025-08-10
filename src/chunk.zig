@@ -55,8 +55,11 @@ test "to_binary" {
     const info_chunk_data: []const u8 = try info_chunk.to_binary(allocator);
     defer allocator.free(info_chunk_data);
 
-    testing.expect(std.mem.eql(u8, info_chunk_data, @embedFile("./riff_files/only_chunk/info.riff"))) catch {
+    const test_data: []const u8 = @embedFile("./riff_files/only_chunk/info.riff");
+
+    testing.expect(std.mem.eql(u8, info_chunk_data, test_data)) catch {
         std.debug.print("info_chunk_data: {x}\n", .{info_chunk_data});
+        std.debug.print("test_data: {x}\n", .{test_data});
         return error.TestUnexpectedResult;
     };
 }
