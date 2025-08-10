@@ -57,14 +57,9 @@ pub fn to_binary(
     return result.toOwnedSlice();
 }
 
-pub const Data = union(DataTag) {
+pub const Data = union(enum) {
     chunk: Chunk,
     list: ListChunk,
-};
-
-pub const DataTag = enum {
-    chunk,
-    list,
 };
 
 test "size" {
