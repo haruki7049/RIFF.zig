@@ -76,7 +76,12 @@ pub const FromBinary = struct {
             defer allocator.free(chunks);
 
             try result.appendSlice(chunks);
-        } else if (data_type_info.pointer.child == RIFFChunk.Data) {} else {
+        } else if (data_type_info.pointer.child == RIFFChunk.Data) {
+            const d: []const RIFFChunk.Data = try FromBinary.to_data(input, allocator);
+            defer allocator.free(d);
+
+            try result.appendSlice(d);
+        } else {
             unreachable;
         }
 
@@ -120,13 +125,26 @@ pub const FromBinary = struct {
         return result;
     }
 
-    fn to_data(input: []const u8) []const RIFFChunk.Data {
-        std.debug.print("In FromBinary.to_data()    input: {any}\n", .{input});
+    fn to_data(input: []const u8, allocator: Allocator) ![]const RIFFChunk.Data {
+        var result = ArrayList(RIFFChunk.Data).init(allocator);
 
-        if (input.len < 12)
-            return &[_]RIFFChunk.Data{};
+        const id_bin: [4]u8 = const_to_mut(input[0..4]);
+        const size_bin: [4]u8 = const_to_mut(input[4..8]);
+        const local_size: usize = FromBinary.size(size_bin);
 
-        @panic("TODO");
+        const four_cc_bin: [4]u8 = const_to_mut(input[8..12]);
+        const data_len = local_size - 4;
+        const data_bin: []const u8 = input[12 .. 12 + data_len];
+
+        const d: RIFFChunk.Data = RIFFChunk.Data{ .chunk = Chunk{
+            .id = id_bin,
+            .four_cc = four_cc_bin,
+            .data = data_bin,
+        } };
+
+        try result.append(d);
+
+        return result.toOwnedSlice();
     }
 };
 
