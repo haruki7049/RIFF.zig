@@ -13,5 +13,18 @@ pub fn main() !void {
     const riff_chunk: RIFFChunk = try RIFFChunk.from_binary(data, gpa);
     defer gpa.free(riff_chunk.data);
 
-    std.debug.print("list.riff: {any}\n", .{riff_chunk});
+    std.debug.print("riff_chunk: {any}\n", .{riff_chunk});
+    std.debug.print("riff_chunk.data: {any}\n", .{riff_chunk.data});
+
+    switch (riff_chunk.data[0]) {
+        .chunk => {
+            std.debug.print("riff_chunk.data[0].chunk: {any}\n", .{riff_chunk.data[0].chunk});
+            std.debug.print("riff_chunk.data[0].chunk.id: {s}\n", .{riff_chunk.data[0].chunk.id});
+            std.debug.print("riff_chunk.data[0].chunk.four_cc: {x}\n", .{riff_chunk.data[0].chunk.four_cc});
+            std.debug.print("riff_chunk.data[0].chunk.data: {s}\n", .{riff_chunk.data[0].chunk.data});
+        },
+        .list => {
+            std.debug.print("riff_chunk.data[0].list: {any}\n", .{riff_chunk.data[0].list});
+        },
+    }
 }
