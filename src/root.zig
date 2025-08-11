@@ -136,11 +136,22 @@ pub const FromBinary = struct {
         const data_len = local_size - 4;
         const data_bin: []const u8 = input[12 .. 12 + data_len];
 
-        const d: RIFFChunk.Data = RIFFChunk.Data{ .chunk = Chunk{
-            .id = id_bin,
-            .four_cc = four_cc_bin,
-            .data = data_bin,
-        } };
+        var d: RIFFChunk.Data = undefined;
+        if (std.mem.eql(u8, &id_bin, "LIST")) {
+            const chunks: []const Chunk = try FromBinary.to_chunks(data_bin, allocator);
+            defer allocator.free(chunks);
+
+            d = RIFFChunk.Data{ .list = ListChunk{
+                .four_cc = four_cc_bin,
+                .data = chunks,
+            } };
+        } else {
+            d = RIFFChunk.Data{ .chunk = Chunk{
+                .id = id_bin,
+                .four_cc = four_cc_bin,
+                .data = data_bin,
+            } };
+        }
 
         try result.append(d);
 

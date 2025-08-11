@@ -23,6 +23,11 @@ pub fn main() !void {
         },
         .list => {
             std.debug.print("riff_chunk.data[0].list: {any}\n", .{riff_chunk.data[0].list});
+            std.debug.print("riff_chunk.data[0].list.id: {s}\n", .{riff_chunk.data[0].list.id});
+            std.debug.print("riff_chunk.data[0].list.four_cc: {s}\n", .{riff_chunk.data[0].list.four_cc});
+            std.debug.print("riff_chunk.data[0].list.data: {any}\n", .{riff_chunk.data[0].list.data});
+            std.debug.print("riff_chunk.data[0].list.data[0]: {any}\n", .{riff_chunk.data[0].list.data[0]});
+            std.debug.print("riff_chunk.data[0].list.data[0].id: {s}\n", .{riff_chunk.data[0].list.data[0].id});
         },
     }
 }
