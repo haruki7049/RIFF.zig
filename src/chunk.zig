@@ -25,15 +25,15 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
     const four_cc_bin: []const u8 = self.four_cc[0..];
     const data_bin: []const u8 = self.data;
 
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result: std.array_list.Aligned(u8, null) = .empty;
+    defer result.deinit(allocator);
 
-    try result.appendSlice(id_bin);
-    try result.appendSlice(size_bin);
-    try result.appendSlice(four_cc_bin);
-    try result.appendSlice(data_bin);
+    try result.appendSlice(allocator, id_bin);
+    try result.appendSlice(allocator, size_bin);
+    try result.appendSlice(allocator, four_cc_bin);
+    try result.appendSlice(allocator, data_bin);
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 pub fn from_binary(input: []const u8) Self {

@@ -20,8 +20,8 @@ pub const ToBinary = struct {
 
     /// Converts RIFFChunk or ListChunk to []u8, in order to use in binary's data part
     pub fn data(comptime T: type, self: T, allocator: Allocator) ![]u8 {
-        var result = std.ArrayList(u8).init(allocator);
-        defer result.deinit();
+        var result: std.array_list.Aligned(u8, null) = .empty;
+        defer result.deinit(allocator);
 
         const data_type: type = @FieldType(T, "data");
 
@@ -33,20 +33,20 @@ pub const ToBinary = struct {
                 };
                 defer allocator.free(binary);
 
-                try result.appendSlice(binary);
+                try result.appendSlice(allocator, binary);
             }
         } else if (data_type == []const Chunk) {
             for (self.data) |chunk| {
                 const binary = try chunk.to_binary(allocator);
                 defer allocator.free(binary);
 
-                try result.appendSlice(binary);
+                try result.appendSlice(allocator, binary);
             }
         } else {
             unreachable;
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 };
 
@@ -65,34 +65,34 @@ pub const FromBinary = struct {
     pub fn data(comptime T: type, input: []const u8, allocator: Allocator) !@FieldType(T, "data") {
         const data_type_info = @typeInfo(@FieldType(T, "data"));
 
-        var result = ArrayList(data_type_info.pointer.child).init(allocator);
-        defer result.deinit();
+        var result: std.array_list.Aligned(data_type_info.pointer.child, null) = .empty;
+        defer result.deinit(allocator);
 
         if (input.len < 12)
-            return result.toOwnedSlice();
+            return result.toOwnedSlice(allocator);
 
         if (data_type_info.pointer.child == Chunk) {
             const chunks: []const Chunk = try FromBinary.to_chunks(input, allocator);
             defer allocator.free(chunks);
 
-            try result.appendSlice(chunks);
+            try result.appendSlice(allocator, chunks);
         } else if (data_type_info.pointer.child == RIFFChunk.Data) {
             const d: []const RIFFChunk.Data = try FromBinary.to_data(input, allocator);
             defer allocator.free(d);
 
-            try result.appendSlice(d);
+            try result.appendSlice(allocator, d);
         } else {
             unreachable;
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 
     fn to_chunks(
         input: []const u8,
         allocator: Allocator,
     ) ![]const Chunk {
-        var result = ArrayList(Chunk).init(allocator);
+        var result: std.array_list.Aligned(Chunk, null) = .empty;
 
         const id_bin: [4]u8 = const_to_mut(input[0..4]);
         const size_bin: [4]u8 = const_to_mut(input[4..8]);
@@ -108,9 +108,9 @@ pub const FromBinary = struct {
             .data = data_bin,
         };
 
-        try result.append(chunk);
+        try result.append(allocator, chunk);
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 
     fn const_to_mut(slice: []const u8) [4]u8 {
@@ -126,7 +126,7 @@ pub const FromBinary = struct {
     }
 
     fn to_data(input: []const u8, allocator: Allocator) ![]const RIFFChunk.Data {
-        var result = ArrayList(RIFFChunk.Data).init(allocator);
+        var result: std.array_list.Aligned(RIFFChunk.Data, null) = .empty;
 
         const id_bin: [4]u8 = const_to_mut(input[0..4]);
         const size_bin: [4]u8 = const_to_mut(input[4..8]);
@@ -153,9 +153,9 @@ pub const FromBinary = struct {
             } };
         }
 
-        try result.append(d);
+        try result.append(allocator, d);
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(allocator);
     }
 };
 
