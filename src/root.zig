@@ -135,7 +135,7 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
 /// Errors:
 ///   - `InvalidFormat`: If any chunk header is incomplete.
 ///   - `SizeMismatch`: If any chunk size extends beyond available data.
-///   - `std.mem.Allocator.Error`: If memory allocation fails during parsing.
+///   - Memory allocation errors from the allocator if allocation fails during parsing.
 fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.mem.Allocator.Error)![]const Chunk {
     var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
