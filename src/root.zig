@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Represents a RIFF (Resource Interchange File Format) chunk.
-/// models the three types of chunks that can appear in RIFF files.
+/// Models the three types of chunks that can appear in RIFF files.
 pub const Chunk = union(enum) {
     /// A basic RIFF chunk with a FourCC identifier and data payload.
     /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
@@ -58,7 +58,7 @@ pub const Error = error{
 ///   - `allocator`: Memory allocator used for temporary buffers during serialization.
 ///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
 ///
-/// Returns: An error if writing fails or memory allocation fails.
+/// Returns: `void` on success, or an error if writing fails or memory allocation fails.
 pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !void {
     switch (chunk) {
         .chunk => |b| {
