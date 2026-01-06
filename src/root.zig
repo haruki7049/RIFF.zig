@@ -22,6 +22,8 @@
 //! const riff = @import("riff_zig");
 //!
 //! // Create a WAVE file structure
+//! const format_data = "..."; // Your format chunk data
+//! const audio_data = "...";  // Your audio sample data
 //! const wave_chunk = riff.Chunk{ .riff = .{
 //!     .four_cc = "WAVE".*,
 //!     .chunks = &[_]riff.Chunk{
