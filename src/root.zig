@@ -120,7 +120,7 @@ pub const ToChunkListError = error{
 ///   - `allocator`: Memory allocator used for temporary buffers during serialization.
 ///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
 ///
-/// Returns: `void` on success, or an error if writing fails or memory allocation fails.
+/// Returns: `void` on success, or an error from `std.Io.Writer.Error` if writing fails.
 pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (chunk) {
         .chunk => |b| {
@@ -164,9 +164,9 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Wri
 /// Returns: A `Chunk` instance representing the parsed data.
 ///
 /// Errors:
-///   - `InvalidFormat`: If the data is too short or malformed.
-///   - `SizeMismatch`: If the chunk size doesn't match the available data.
-///   - `OutOfMemory`: If memory allocation fails during parsing.
+///   - `InvalidFormat`: If the data is too short or malformed (from `ToChunkListError` or `FourCC.NewError`).
+///   - `SizeMismatch`: If the chunk size doesn't match the available data (from `ToChunkListError`).
+///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
 pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
     if (bytes.len < 8) return error.InvalidFormat;
 
@@ -199,9 +199,9 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListE
 /// Returns: A slice of parsed `Chunk` instances.
 ///
 /// Errors:
-///   - `InvalidFormat`: If any chunk header is incomplete.
-///   - `SizeMismatch`: If any chunk size extends beyond available data.
-///   - `OutOfMemory`: If memory allocation fails during parsing.
+///   - `InvalidFormat`: If any chunk header is incomplete (from `ToChunkListError` or `FourCC.NewError`).
+///   - `SizeMismatch`: If any chunk size extends beyond available data (from `ToChunkListError`).
+///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
 fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
     var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
