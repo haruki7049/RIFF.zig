@@ -1,6 +1,6 @@
 .{
     .name = .riff_zig,
-    .version = "0.0.0",
+    .version = "0.1.0",
     .fingerprint = 0xf047f87f03f4b127,
     .minimum_zig_version = "0.15.2",
 
