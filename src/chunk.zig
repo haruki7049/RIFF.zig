@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const Allocator = std.mem.Allocator;
 const Self = @This();
 const project_root = @import("./root.zig");
 const ToBinary = project_root.ToBinary;
@@ -19,7 +18,7 @@ pub fn size(self: Self) usize {
     return four_cc_size + data_size;
 }
 
-pub fn to_binary(self: Self, allocator: Allocator) ![]const u8 {
+pub fn to_binary(self: Self, allocator: std.mem.Allocator) ![]const u8 {
     const id_bin: []const u8 = self.id[0..];
     const size_bin: []const u8 = &ToBinary.size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
