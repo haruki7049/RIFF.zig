@@ -151,6 +151,9 @@ test "chunk serialization" {
 
     const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, list.items);
+
+    const chunk_file: []const u8 = @embedFile("assets/chunk.riff");
+    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
 }
 
 test "list_chunk serialization" {
@@ -172,6 +175,9 @@ test "list_chunk serialization" {
 
     const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, list.items);
+
+    const chunk_file: []const u8 = @embedFile("assets/list_chunk.riff");
+    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
 }
 
 test "riff_chunk serialization" {
@@ -196,4 +202,7 @@ test "riff_chunk serialization" {
 
     const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
     try std.testing.expectEqualSlices(u8, expected, list.items);
+
+    const chunk_file: []const u8 = @embedFile("assets/riff_chunk.riff");
+    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
 }
