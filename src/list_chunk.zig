@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const Allocator = std.mem.Allocator;
 const Chunk = @import("./chunk.zig");
 const Self = @This();
 
@@ -31,7 +30,7 @@ pub fn size(self: Self) usize {
     return four_cc_size + data_size;
 }
 
-pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
+pub fn to_binary(self: Self, allocator: std.mem.Allocator) ![]u8 {
     const id_bin: []const u8 = self.id[0..];
     const size_bin: [4]u8 = ToBinary.size(self.size());
     const four_cc_bin: []const u8 = self.four_cc[0..];
@@ -49,7 +48,7 @@ pub fn to_binary(self: Self, allocator: Allocator) ![]u8 {
     return result.toOwnedSlice(allocator);
 }
 
-pub fn from_binary(input: []const u8, allocator: Allocator) !Self {
+pub fn from_binary(input: []const u8, allocator: std.mem.Allocator) !Self {
     const id: [4]u8 = input[0..4].*;
     const size_bin: [4]u8 = input[4..8].*;
     const four_cc: [4]u8 = input[8..12].*;
