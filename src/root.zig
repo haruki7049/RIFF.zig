@@ -44,13 +44,14 @@
 //! // Parse from file
 //! const data = try std.fs.cwd().readFileAlloc(allocator, "input.wav", 1024 * 1024);
 //! defer allocator.free(data);
-//! const parsed = try riff.from_slice(allocator, data);
+//! var reader = std.Io.Reader.fixed(data);
+//! const parsed = try riff.read(allocator, &reader);
 //! defer parsed.deinit(allocator);
 //! ```
 //!
 //! ## API Functions
 //!
-//! - `from_slice`: Parse a RIFF chunk from binary data
+//! - `read`: Parse a RIFF chunk from a reader
 //! - `write`: Serialize a RIFF chunk to a writer
 //! - `Chunk.deinit`: Free allocated memory for a chunk and its children
 
@@ -157,12 +158,12 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
     }
 }
 
-/// Parses a RIFF chunk from binary data.
+/// Parses a RIFF chunk from a reader.
 /// Supports parsing of basic chunks, LIST chunks, and RIFF container chunks.
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and its data.
-///   - `bytes`: The raw binary data containing a RIFF chunk to parse.
+///   - `reader`: The reader interface to read RIFF chunk data from.
 ///
 /// Returns: A `Chunk` instance representing the parsed data.
 ///
@@ -200,7 +201,7 @@ pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) (ToChunkListEr
 }
 
 /// Internal helper function to parse a sequence of chunks from binary data.
-/// Used by `from_slice` to parse the contents of LIST and RIFF chunks.
+/// Used by `read` to parse the contents of LIST and RIFF chunks.
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating chunk structures.
