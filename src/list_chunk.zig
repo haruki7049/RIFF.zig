@@ -83,7 +83,7 @@ test "to_binary" {
     const data: []const u8 = try list_chunk.to_binary(allocator);
     defer allocator.free(data);
 
-    testing.expect(std.mem.eql(u8, data, @embedFile("./riff_files/only_list_chunk/only_list.riff"))) catch {
+    testing.expect(std.mem.eql(u8, data, @embedFile("./assets/only_list_chunk/only_list.riff"))) catch {
         std.debug.print("data: {x}\n", .{data});
         return error.TestUnexpectedResult;
     };
@@ -91,7 +91,7 @@ test "to_binary" {
 
 test "from_binary list_with_info" {
     const allocator = testing.allocator;
-    const list_with_info_data: []const u8 = @embedFile("./riff_files/list_chunk/list_with_info.riff");
+    const list_with_info_data: []const u8 = @embedFile("./assets/list_chunk/list_with_info.riff");
     const list_with_info_result: Self = try Self.from_binary(list_with_info_data, allocator);
     defer allocator.free(list_with_info_result.data);
 
@@ -107,7 +107,7 @@ test "from_binary list_with_info" {
 
 test "from_binary list_with_data" {
     const allocator = testing.allocator;
-    const list_with_info_data: []const u8 = @embedFile("./riff_files/list_chunk/list_with_data.riff");
+    const list_with_info_data: []const u8 = @embedFile("./assets/list_chunk/list_with_data.riff");
     const list_with_info_result: Self = try Self.from_binary(list_with_info_data, allocator);
     defer allocator.free(list_with_info_result.data);
 
@@ -123,7 +123,7 @@ test "from_binary list_with_data" {
 
 test "from_binary only_list_chunk" {
     const allocator = testing.allocator;
-    const only_list_chunk_data: []const u8 = @embedFile("./riff_files/only_list_chunk/only_list.riff");
+    const only_list_chunk_data: []const u8 = @embedFile("./assets/only_list_chunk/only_list.riff");
     const only_list_chunk_result: Self = try Self.from_binary(only_list_chunk_data, allocator);
     defer allocator.free(only_list_chunk_result.data);
 

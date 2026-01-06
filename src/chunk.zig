@@ -72,7 +72,7 @@ test "to_binary" {
     const info_chunk_data: []const u8 = try info_chunk.to_binary(allocator);
     defer allocator.free(info_chunk_data);
 
-    const test_data: []const u8 = @embedFile("./riff_files/only_chunk/info.riff");
+    const test_data: []const u8 = @embedFile("./assets/only_chunk/info.riff");
 
     testing.expect(std.mem.eql(u8, info_chunk_data, test_data)) catch {
         std.debug.print("info_chunk_data: {x}\n", .{info_chunk_data});
@@ -82,7 +82,7 @@ test "to_binary" {
 }
 
 test "from_binary" {
-    const info_chunk_data: []const u8 = @embedFile("./riff_files/only_chunk/info.riff");
+    const info_chunk_data: []const u8 = @embedFile("./assets/only_chunk/info.riff");
     const result: Self = Self.from_binary(info_chunk_data);
 
     try testing.expect(std.mem.eql(u8, &result.id, &[_]u8{ 'i', 'n', 'f', 'o' }));
