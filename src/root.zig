@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Represents a RIFF (Resource Interchange File Format) chunk.
-/// models the three types of chunks that can appear in RIFF files.
+/// Models the three types of chunks that can appear in RIFF files.
 pub const Chunk = union(enum) {
     /// A basic RIFF chunk with a FourCC identifier and data payload.
     /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
@@ -34,17 +34,31 @@ pub const Chunk = union(enum) {
     }
 };
 
+/// Error types that can occur during RIFF chunk parsing and serialization.
 pub const Error = error{
+    /// The input data does not conform to the expected RIFF format structure.
     InvalidFormat,
+    /// The chunk identifier (FourCC) is not recognized or invalid.
     InvalidId,
+    /// The size field in the chunk header is invalid or inconsistent.
     InvalidSize,
+    /// The chunk data payload is corrupted or invalid.
     InvalidData,
+    /// The actual data size does not match the size specified in the header.
     SizeMismatch,
+    /// Memory allocation failed during parsing or serialization.
     OutOfMemory,
 };
 
-/// Converts a RIFF chunk to its binary representation.
-/// Serialization follows: Header (4 bytes) + Size (4 bytes, LE) + Data.
+/// Converts a RIFF chunk to its binary representation and writes it to a writer.
+/// Serialization follows the RIFF specification: Header (4 bytes FourCC) + Size (4 bytes, little-endian) + Data.
+///
+/// Parameters:
+///   - `chunk`: The RIFF chunk to serialize (can be .chunk, .list, or .riff variant).
+///   - `allocator`: Memory allocator used for temporary buffers during serialization.
+///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
+///
+/// Returns: `void` on success, or an error if writing fails or memory allocation fails.
 pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !void {
     switch (chunk) {
         .chunk => |b| {
@@ -75,6 +89,18 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !v
 }
 
 /// Parses a RIFF chunk from binary data.
+/// Supports parsing of basic chunks, LIST chunks, and RIFF container chunks.
+///
+/// Parameters:
+///   - `allocator`: Memory allocator for creating the chunk structure and its data.
+///   - `bytes`: The raw binary data containing a RIFF chunk to parse.
+///
+/// Returns: A `Chunk` instance representing the parsed data.
+///
+/// Errors:
+///   - `InvalidFormat`: If the data is too short or malformed.
+///   - `SizeMismatch`: If the chunk size doesn't match the available data.
+///   - `OutOfMemory`: If memory allocation fails during parsing.
 pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
     if (bytes.len < 8) return error.InvalidFormat;
 
@@ -97,6 +123,19 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
     }
 }
 
+/// Internal helper function to parse a sequence of chunks from binary data.
+/// Used by `from_slice` to parse the contents of LIST and RIFF chunks.
+///
+/// Parameters:
+///   - `allocator`: Memory allocator for creating chunk structures.
+///   - `bytes`: The raw binary data containing one or more sequential chunks.
+///
+/// Returns: A slice of parsed `Chunk` instances.
+///
+/// Errors:
+///   - `InvalidFormat`: If any chunk header is incomplete.
+///   - `SizeMismatch`: If any chunk size extends beyond available data.
+///   - `OutOfMemory`: If memory allocation fails during parsing.
 fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.mem.Allocator.Error)![]const Chunk {
     var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
