@@ -175,3 +175,27 @@ test "list_chunk serialization" {
     const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, list.items);
 }
+
+test "riff_chunk serialization" {
+    const allocator = std.testing.allocator;
+
+    const riff_chunk = Chunk{ .riff = .{
+        .four_cc = "TEST".*,
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = "fmt ".*, .data = "" } },
+            .{ .chunk = .{ .four_cc = "data".*, .data = "" } },
+        },
+    } };
+
+    var list: std.array_list.Aligned(u8, null) = blk: {
+        var list: std.array_list.Aligned(u8, null) = .empty;
+        errdefer list.deinit(allocator);
+
+        try to_writer(riff_chunk, allocator, list.writer(allocator));
+        break :blk list;
+    };
+    defer list.deinit(allocator);
+
+    const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
+    try std.testing.expectEqualSlices(u8, expected, list.items);
+}
