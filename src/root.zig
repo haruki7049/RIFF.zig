@@ -1,6 +1,4 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
 
 pub const Chunk = @import("./chunk.zig");
 pub const RIFFChunk = @import("./riff_chunk.zig");
@@ -19,7 +17,7 @@ pub const ToBinary = struct {
     }
 
     /// Converts RIFFChunk or ListChunk to []u8, in order to use in binary's data part
-    pub fn data(comptime T: type, self: T, allocator: Allocator) ![]u8 {
+    pub fn data(comptime T: type, self: T, allocator: std.mem.Allocator) ![]u8 {
         var result: std.array_list.Aligned(u8, null) = .empty;
         defer result.deinit(allocator);
 
@@ -62,7 +60,7 @@ pub const FromBinary = struct {
     }
 
     /// This function is used by RIFFChunk & ListChunk
-    pub fn data(comptime T: type, input: []const u8, allocator: Allocator) !@FieldType(T, "data") {
+    pub fn data(comptime T: type, input: []const u8, allocator: std.mem.Allocator) !@FieldType(T, "data") {
         const data_type_info = @typeInfo(@FieldType(T, "data"));
 
         var result: std.array_list.Aligned(data_type_info.pointer.child, null) = .empty;
@@ -90,7 +88,7 @@ pub const FromBinary = struct {
 
     fn to_chunks(
         input: []const u8,
-        allocator: Allocator,
+        allocator: std.mem.Allocator,
     ) ![]const Chunk {
         var result: std.array_list.Aligned(Chunk, null) = .empty;
 
@@ -125,7 +123,7 @@ pub const FromBinary = struct {
         return result;
     }
 
-    fn to_data(input: []const u8, allocator: Allocator) ![]const RIFFChunk.Data {
+    fn to_data(input: []const u8, allocator: std.mem.Allocator) ![]const RIFFChunk.Data {
         var result: std.array_list.Aligned(RIFFChunk.Data, null) = .empty;
 
         const id_bin: [4]u8 = const_to_mut(input[0..4]);
