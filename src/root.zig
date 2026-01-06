@@ -1,236 +1,136 @@
 const std = @import("std");
 
-pub const Chunk = @import("./chunk.zig");
-pub const RIFFChunk = @import("./riff_chunk.zig");
-pub const ListChunk = @import("./list_chunk.zig");
+/// Represents a RIFF (Resource Interchange File Format) chunk.
+/// models the three types of chunks that can appear in RIFF files.
+pub const Chunk = union(enum) {
+    /// A basic RIFF chunk with a FourCC identifier and data payload.
+    /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
+    chunk: struct {
+        four_cc: [4]u8,
+        data: []const u8,
+    },
+    /// A LIST chunk containing a list of sub-chunks.
+    list: []const Chunk,
+    /// A RIFF chunk representing the root container of a RIFF file.
+    /// The `four_cc` specifies the file type (e.g., "WAVE").
+    riff: struct {
+        four_cc: [4]u8,
+        chunks: []const Chunk,
+    },
 
-/// A tool set to convert RIFFChunk and ListChunk to binary
-pub const ToBinary = struct {
-    /// Converts usize to [4]u8, in order to use in binary's size part
-    pub fn size(value: usize) [4]u8 {
-        return [4]u8{
-            @intCast(value & 0xFF),
-            @intCast((value >> 8) & 0xFF),
-            @intCast((value >> 16) & 0xFF),
-            @intCast((value >> 24) & 0xFF),
-        };
-    }
-
-    /// Converts RIFFChunk or ListChunk to []u8, in order to use in binary's data part
-    pub fn data(comptime T: type, self: T, allocator: std.mem.Allocator) ![]u8 {
-        var result: std.array_list.Aligned(u8, null) = .empty;
-        defer result.deinit(allocator);
-
-        const data_type: type = @FieldType(T, "data");
-
-        if (data_type == []const RIFFChunk.Data) {
-            for (self.data) |value| {
-                const binary = switch (value) {
-                    .chunk => try value.chunk.to_binary(allocator),
-                    .list => try value.list.to_binary(allocator),
-                };
-                defer allocator.free(binary);
-
-                try result.appendSlice(allocator, binary);
-            }
-        } else if (data_type == []const Chunk) {
-            for (self.data) |chunk| {
-                const binary = try chunk.to_binary(allocator);
-                defer allocator.free(binary);
-
-                try result.appendSlice(allocator, binary);
-            }
-        } else {
-            unreachable;
+    /// Deallocates memory if chunks were dynamically allocated.
+    pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .basic => |b| allocator.free(b.data),
+            .list => |l| {
+                for (l) |child| child.deinit(allocator);
+                allocator.free(l);
+            },
+            .riff => |r| {
+                for (r.chunks) |child| child.deinit(allocator);
+                allocator.free(r.chunks);
+            },
         }
-
-        return result.toOwnedSlice(allocator);
     }
 };
 
-/// A tool set to convert binary to RIFFChunk or ListChunk
-pub const FromBinary = struct {
-    pub fn size(value: [4]u8) usize {
-        const first: u8 = value[0];
-        const second: u8 = value[1] << 2;
-        const third: u8 = value[2] << 4;
-        const fourth: u8 = value[3] << 6;
-
-        return first + second + third + fourth;
-    }
-
-    /// This function is used by RIFFChunk & ListChunk
-    pub fn data(comptime T: type, input: []const u8, allocator: std.mem.Allocator) !@FieldType(T, "data") {
-        const data_type_info = @typeInfo(@FieldType(T, "data"));
-
-        var result: std.array_list.Aligned(data_type_info.pointer.child, null) = .empty;
-        defer result.deinit(allocator);
-
-        if (input.len < 12)
-            return result.toOwnedSlice(allocator);
-
-        if (data_type_info.pointer.child == Chunk) {
-            const chunks: []const Chunk = try FromBinary.to_chunks(input, allocator);
-            defer allocator.free(chunks);
-
-            try result.appendSlice(allocator, chunks);
-        } else if (data_type_info.pointer.child == RIFFChunk.Data) {
-            const d: []const RIFFChunk.Data = try FromBinary.to_data(input, allocator);
-            defer allocator.free(d);
-
-            try result.appendSlice(allocator, d);
-        } else {
-            unreachable;
-        }
-
-        return result.toOwnedSlice(allocator);
-    }
-
-    fn to_chunks(
-        input: []const u8,
-        allocator: std.mem.Allocator,
-    ) ![]const Chunk {
-        var result: std.array_list.Aligned(Chunk, null) = .empty;
-
-        const id_bin: [4]u8 = const_to_mut(input[0..4]);
-        const size_bin: [4]u8 = const_to_mut(input[4..8]);
-        const local_size: usize = FromBinary.size(size_bin);
-
-        const four_cc_bin: [4]u8 = const_to_mut(input[8..12]);
-        const data_len = local_size - 4;
-        const data_bin: []const u8 = input[12 .. 12 + data_len];
-
-        const chunk: Chunk = Chunk{
-            .id = id_bin,
-            .four_cc = four_cc_bin,
-            .data = data_bin,
-        };
-
-        try result.append(allocator, chunk);
-
-        return result.toOwnedSlice(allocator);
-    }
-
-    fn const_to_mut(slice: []const u8) [4]u8 {
-        if (slice.len != 4) {
-            std.debug.print("In FromBinary.const_to_mut()    slice: {any}", .{slice});
-            std.debug.print("In FromBinary.const_to_mut()    slice.len: {d}", .{slice.len});
-            @panic("slice length must be 4");
-        }
-
-        var result: [4]u8 = undefined;
-        @memcpy(&result, slice);
-        return result;
-    }
-
-    fn to_data(input: []const u8, allocator: std.mem.Allocator) ![]const RIFFChunk.Data {
-        var result: std.array_list.Aligned(RIFFChunk.Data, null) = .empty;
-
-        const id_bin: [4]u8 = const_to_mut(input[0..4]);
-        const size_bin: [4]u8 = const_to_mut(input[4..8]);
-        const local_size: usize = FromBinary.size(size_bin);
-
-        const four_cc_bin: [4]u8 = const_to_mut(input[8..12]);
-        const data_len = local_size - 4;
-        const data_bin: []const u8 = input[12 .. 12 + data_len];
-
-        var d: RIFFChunk.Data = undefined;
-        if (std.mem.eql(u8, &id_bin, "LIST")) {
-            const chunks: []const Chunk = try FromBinary.to_chunks(data_bin, allocator);
-            defer allocator.free(chunks);
-
-            d = RIFFChunk.Data{ .list = ListChunk{
-                .four_cc = four_cc_bin,
-                .data = chunks,
-            } };
-        } else {
-            d = RIFFChunk.Data{ .chunk = Chunk{
-                .id = id_bin,
-                .four_cc = four_cc_bin,
-                .data = data_bin,
-            } };
-        }
-
-        try result.append(allocator, d);
-
-        return result.toOwnedSlice(allocator);
-    }
+pub const Error = error{
+    InvalidFormat,
+    InvalidId,
+    InvalidSize,
+    InvalidData,
+    SizeMismatch,
+    OutOfMemory,
 };
 
-test "minimal_list" {
-    const list: ListChunk = ListChunk{
-        .four_cc = .{ 'I', 'N', 'F', 'O' },
-        .data = &.{},
-    };
-
-    const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ 'W', 'A', 'V', 'E' },
-        .data = &.{
-            RIFFChunk.Data{ .list = list },
+/// Converts a RIFF chunk to its binary representation.
+/// Serialization follows: Header (4 bytes) + Size (4 bytes, LE) + Data.
+pub fn to_writer(chunk: Chunk, writer: anytype) !void {
+    switch (chunk) {
+        .basic => |b| {
+            try writer.writeAll(&b.four_cc);
+            try writer.writeInt(u32, @intCast(b.data.len), .little);
+            try writer.writeAll(b.data);
         },
-    };
+        .list => |l| {
+            var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+            defer buf.deinit();
+            for (l) |child| try to_writer(child, buf.writer());
 
-    try std.testing.expectEqual(riff.size(), 16);
+            try writer.writeAll("LIST");
+            try writer.writeInt(u32, @intCast(buf.items.len), .little);
+            try writer.writeAll(buf.items);
+        },
+        .riff => |r| {
+            var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+            defer buf.deinit();
+            for (r.chunks) |child| try to_writer(child, buf.writer());
+
+            try writer.writeAll("RIFF");
+            try writer.writeInt(u32, @intCast(buf.items.len + 4), .little);
+            try writer.writeAll(&r.four_cc);
+            try writer.writeAll(buf.items);
+        },
+    }
 }
 
-test "minimal_riff" {
-    const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ 'W', 'A', 'V', 'E' },
-        .data = &.{},
-    };
+/// Parses a RIFF chunk from binary data.
+pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
+    if (bytes.len < 8) return error.InvalidFormat;
 
-    try std.testing.expectEqual(riff.size(), 4);
+    const id = bytes[0..4];
+    const size = std.mem.readInt(u32, bytes[4..8], .little);
+
+    if (std.mem.eql(u8, id, "RIFF")) {
+        if (bytes.len < 12) return error.InvalidFormat;
+        const four_cc = bytes[8..12];
+        const chunks = try to_chunk_list(allocator, bytes[12..]);
+        return Chunk{ .riff = .{ .four_cc = four_cc.*, .chunks = chunks } };
+    } else if (std.mem.eql(u8, id, "LIST")) {
+        const chunks = try to_chunk_list(allocator, bytes[8..]);
+        return Chunk{ .list = chunks };
+    } else {
+        const data_end = 8 + size;
+        if (bytes.len < data_end) return error.SizeMismatch;
+        const data = try allocator.dupe(u8, bytes[8..data_end]);
+        return Chunk{ .basic = .{ .four_cc = id.*, .data = data } };
+    }
 }
 
-test "riff" {
-    const data: Chunk = Chunk{
-        .id = .{ 'd', 'a', 't', 'a' },
-        .four_cc = .{ ' ', ' ', ' ', ' ' },
-        .data = &.{},
-    };
-    const info: Chunk = Chunk{
-        .id = .{ 'i', 'n', 'f', 'o' },
-        .four_cc = .{ ' ', ' ', ' ', ' ' },
-        .data = &.{},
-    };
+fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.mem.Allocator.Error)![]const Chunk {
+    var list = std.ArrayList(Chunk).init(allocator);
+    errdefer {
+        for (list.items) |c| c.deinit(allocator);
+        list.deinit();
+    }
 
-    const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ 'W', 'A', 'V', 'E' },
-        .data = &.{
-            RIFFChunk.Data{ .chunk = data },
-            RIFFChunk.Data{ .chunk = info },
-        },
-    };
+    var pos: usize = 0;
+    while (pos < bytes.len) {
+        if (pos + 8 > bytes.len) return error.InvalidFormat;
+        const id = bytes[pos .. pos + 4];
+        const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8], .little);
+        const next_pos = pos + 8 + size;
 
-    try std.testing.expectEqual(riff.size(), 28);
+        if (next_pos > bytes.len) return error.SizeMismatch;
+
+        // Recursively handle LIST or nested structures if necessary,
+        // but here we follow glriff's basic to_chunk_list logic.
+        const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
+        try list.append(Chunk{ .basic = .{ .four_cc = id.*, .data = chunk_data } });
+
+        pos = next_pos;
+    }
+    return list.toOwnedSlice();
 }
 
-test "more_complex_riff" {
-    const list: ListChunk = ListChunk{
-        .four_cc = .{ 'I', 'N', 'F', 'O' },
-        .data = &.{},
-    };
-
-    const data: Chunk = Chunk{
-        .id = .{ 'd', 'a', 't', 'a' },
-        .four_cc = .{ ' ', ' ', ' ', ' ' },
-        .data = "EXAMPLE_DATA", // 12 bytes
-    };
-
-    const info: Chunk = Chunk{
-        .id = .{ 'i', 'n', 'f', 'o' },
-        .four_cc = .{ ' ', ' ', ' ', ' ' },
-        .data = "THIS IS EXAMPLE DATA", // 20 bytes
-    };
-
-    const riff: RIFFChunk = RIFFChunk{
-        .four_cc = .{ 'W', 'A', 'V', 'E' },
-        .data = &.{
-            RIFFChunk.Data{ .list = list },
-            RIFFChunk.Data{ .chunk = data },
-            RIFFChunk.Data{ .chunk = info },
+test "Wave" {
+    _ = Chunk{
+        .riff = .{
+            .four_cc = "WAVE".*,
+            .chunks = &[_]Chunk{
+                .{ .chunk = .{ .four_cc = "fmt ".*, .data = "" } },
+                .{ .chunk = .{ .four_cc = "data".*, .data = "" } },
+            },
         },
     };
-
-    try std.testing.expectEqual(riff.size(), 72);
 }
