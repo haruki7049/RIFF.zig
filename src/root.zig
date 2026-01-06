@@ -21,7 +21,7 @@ pub const Chunk = union(enum) {
     /// Deallocates memory if chunks were dynamically allocated.
     pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
         switch (self) {
-            .basic => |b| allocator.free(b.data),
+            .chunk => |b| allocator.free(b.data),
             .list => |l| {
                 for (l) |child| child.deinit(allocator);
                 allocator.free(l);
@@ -107,14 +107,14 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.
     var pos: usize = 0;
     while (pos < bytes.len) {
         if (pos + 8 > bytes.len) return error.InvalidFormat;
-        const id = bytes[pos .. pos + 4];
-        const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8], .little);
+        const id = bytes[pos .. pos + 4][0..4];
+        const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
         const next_pos = pos + 8 + size;
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
         const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
-        try list.append(Chunk{ .basic = .{ .four_cc = id.*, .data = chunk_data } });
+        try list.append(allocator, Chunk{ .chunk = .{ .four_cc = id.*, .data = chunk_data } });
 
         pos = next_pos;
     }
@@ -205,4 +205,49 @@ test "riff_chunk serialization" {
 
     const chunk_file: []const u8 = @embedFile("assets/riff_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, list.items);
+}
+
+test "chunk deserialization" {
+    const allocator = std.testing.allocator;
+
+    const chunk_filedata: []const u8 = @embedFile("assets/chunk.riff");
+    const chunk: Chunk = try from_slice(allocator, chunk_filedata);
+    defer chunk.deinit(allocator);
+    const expected = Chunk{ .chunk = .{
+        .four_cc = "fmt ".*,
+        .data = "EXAMPLE_DATA",
+    } };
+
+    try std.testing.expectEqualDeep(expected, chunk);
+}
+
+test "list_chunk deserialization" {
+    const allocator = std.testing.allocator;
+
+    const list_chunk_filedata: []const u8 = @embedFile("assets/list_chunk.riff");
+    const list_chunk: Chunk = try from_slice(allocator, list_chunk_filedata);
+    defer list_chunk.deinit(allocator);
+    const expected = Chunk{ .list = &.{
+        .{ .chunk = .{ .four_cc = "fmt ".*, .data = "EXAMPLE_DATA" } },
+        .{ .chunk = .{ .four_cc = "fmt ".*, .data = "EXAMPLE_DATA" } },
+    } };
+
+    try std.testing.expectEqualDeep(expected, list_chunk);
+}
+
+test "riff_chunk deserialization" {
+    const allocator = std.testing.allocator;
+
+    const riff_chunk_filedata: []const u8 = @embedFile("assets/riff_chunk.riff");
+    const riff_chunk: Chunk = try from_slice(allocator, riff_chunk_filedata);
+    defer riff_chunk.deinit(allocator);
+    const expected = Chunk{ .riff = .{
+        .four_cc = "TEST".*,
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = "fmt ".*, .data = "" } },
+            .{ .chunk = .{ .four_cc = "data".*, .data = "" } },
+        },
+    } };
+
+    try std.testing.expectEqualDeep(expected, riff_chunk);
 }
