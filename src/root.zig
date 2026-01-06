@@ -1,3 +1,59 @@
+//! RIFF (Resource Interchange File Format) parser and serializer library for Zig.
+//!
+//! This library provides functionality to parse, manipulate, and serialize RIFF format files.
+//! RIFF is a generic file container format used by many multimedia formats including WAV, AVI, and WebP.
+//!
+//! ## Overview
+//!
+//! RIFF files consist of chunks, where each chunk has:
+//! - A 4-byte identifier (FourCC)
+//! - A 4-byte size field (little-endian)
+//! - Data payload
+//!
+//! This library supports three types of chunks:
+//! - **Basic chunks**: Simple data containers with a FourCC and data payload
+//! - **LIST chunks**: Containers that hold multiple sub-chunks
+//! - **RIFF chunks**: The root container that defines the file type
+//!
+//! ## Usage Example
+//!
+//! ```zig
+//! const std = @import("std");
+//! const riff = @import("riff_zig");
+//!
+//! var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//! defer _ = gpa.deinit();
+//! const allocator = gpa.allocator();
+//!
+//! // Create a WAVE file structure
+//! const format_data = "..."; // Your format chunk data
+//! const audio_data = "...";  // Your audio sample data
+//! const wave_chunk = riff.Chunk{ .riff = .{
+//!     .four_cc = "WAVE".*,
+//!     .chunks = &[_]riff.Chunk{
+//!         .{ .chunk = .{ .four_cc = "fmt ".*, .data = format_data } },
+//!         .{ .chunk = .{ .four_cc = "data".*, .data = audio_data } },
+//!     },
+//! }};
+//!
+//! // Serialize to file
+//! const file = try std.fs.cwd().createFile("output.wav", .{});
+//! defer file.close();
+//! try riff.to_writer(wave_chunk, allocator, file.writer());
+//!
+//! // Parse from file
+//! const data = try std.fs.cwd().readFileAlloc(allocator, "input.wav", 1024 * 1024);
+//! defer allocator.free(data);
+//! const parsed = try riff.from_slice(allocator, data);
+//! defer parsed.deinit(allocator);
+//! ```
+//!
+//! ## API Functions
+//!
+//! - `from_slice`: Parse a RIFF chunk from binary data
+//! - `to_writer`: Serialize a RIFF chunk to a writer
+//! - `Chunk.deinit`: Free allocated memory for a chunk and its children
+
 const std = @import("std");
 
 /// Represents a RIFF (Resource Interchange File Format) chunk.
