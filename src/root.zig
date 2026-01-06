@@ -123,15 +123,13 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.
 }
 
 test "Wave" {
-    _ = Chunk{
-        .riff = .{
-            .four_cc = "WAVE".*,
-            .chunks = &[_]Chunk{
-                .{ .chunk = .{ .four_cc = "fmt ".*, .data = "" } },
-                .{ .chunk = .{ .four_cc = "data".*, .data = "" } },
-            },
+    _ = Chunk{ .riff = .{
+        .four_cc = "WAVE".*,
+        .chunks = &[_]Chunk{
+            .{ .chunk = .{ .four_cc = "fmt ".*, .data = "" } },
+            .{ .chunk = .{ .four_cc = "data".*, .data = "" } },
         },
-    };
+    } };
 }
 
 test "chunk serialization" {
