@@ -121,7 +121,7 @@ pub const ToChunkListError = error{
 ///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
 ///
 /// Returns: `void` on success, or an error if writing fails or memory allocation fails.
-pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !void {
+pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (chunk) {
         .chunk => |b| {
             try writer.writeAll(&b.four_cc.inner);
@@ -129,23 +129,27 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !v
             try writer.writeAll(b.data);
         },
         .list => |l| {
-            var buf: std.array_list.Aligned(u8, null) = .empty;
-            defer buf.deinit(allocator);
-            for (l) |child| try to_writer(child, allocator, buf.writer(allocator));
+            var w = std.Io.Writer.Allocating.init(allocator);
+            defer w.deinit();
+            for (l) |child| try to_writer(child, allocator, &w.writer);
+
+            const written_bytes = w.written();
 
             try writer.writeAll("LIST");
-            try writer.writeInt(u32, @intCast(buf.items.len), .little);
-            try writer.writeAll(buf.items);
+            try writer.writeInt(u32, @intCast(written_bytes.len), .little);
+            try writer.writeAll(written_bytes);
         },
         .riff => |r| {
-            var buf: std.array_list.Aligned(u8, null) = .empty;
-            defer buf.deinit(allocator);
-            for (r.chunks) |child| try to_writer(child, allocator, buf.writer(allocator));
+            var w = std.Io.Writer.Allocating.init(allocator);
+            defer w.deinit();
+            for (r.chunks) |child| try to_writer(child, allocator, &w.writer);
+
+            const writtern_bytes = w.written();
 
             try writer.writeAll("RIFF");
-            try writer.writeInt(u32, @intCast(buf.items.len + 4), .little);
+            try writer.writeInt(u32, @intCast(writtern_bytes.len + 4), .little);
             try writer.writeAll(&r.four_cc.inner);
-            try writer.writeAll(buf.items);
+            try writer.writeAll(writtern_bytes);
         },
     }
 }
@@ -244,20 +248,16 @@ test "chunk serialization" {
         .data = "EXAMPLE_DATA",
     } };
 
-    var list: std.array_list.Aligned(u8, null) = blk: {
-        var list: std.array_list.Aligned(u8, null) = .empty;
-        errdefer list.deinit(allocator);
-
-        try to_writer(chunk, allocator, list.writer(allocator));
-        break :blk list;
-    };
-    defer list.deinit(allocator);
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try to_writer(chunk, allocator, &w.writer);
+    const chunk_data = w.written();
 
     const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
-    try std.testing.expectEqualSlices(u8, expected, list.items);
+    try std.testing.expectEqualSlices(u8, expected, chunk_data);
 
     const chunk_file: []const u8 = @embedFile("assets/chunk.riff");
-    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
+    try std.testing.expectEqualSlices(u8, chunk_file, chunk_data);
 }
 
 test "list_chunk serialization" {
@@ -268,20 +268,16 @@ test "list_chunk serialization" {
         .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
     } };
 
-    var list: std.array_list.Aligned(u8, null) = blk: {
-        var list: std.array_list.Aligned(u8, null) = .empty;
-        errdefer list.deinit(allocator);
-
-        try to_writer(list_chunk, allocator, list.writer(allocator));
-        break :blk list;
-    };
-    defer list.deinit(allocator);
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try to_writer(list_chunk, allocator, &w.writer);
+    const list_chunk_data: []u8 = w.written();
 
     const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
-    try std.testing.expectEqualSlices(u8, expected, list.items);
+    try std.testing.expectEqualSlices(u8, expected, list_chunk_data);
 
     const chunk_file: []const u8 = @embedFile("assets/list_chunk.riff");
-    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
+    try std.testing.expectEqualSlices(u8, chunk_file, list_chunk_data);
 }
 
 test "riff_chunk serialization" {
@@ -295,20 +291,16 @@ test "riff_chunk serialization" {
         },
     } };
 
-    var list: std.array_list.Aligned(u8, null) = blk: {
-        var list: std.array_list.Aligned(u8, null) = .empty;
-        errdefer list.deinit(allocator);
-
-        try to_writer(riff_chunk, allocator, list.writer(allocator));
-        break :blk list;
-    };
-    defer list.deinit(allocator);
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try to_writer(riff_chunk, allocator, &w.writer);
+    const riff_chunk_data: []u8 = w.written();
 
     const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
-    try std.testing.expectEqualSlices(u8, expected, list.items);
+    try std.testing.expectEqualSlices(u8, expected, riff_chunk_data);
 
     const chunk_file: []const u8 = @embedFile("assets/riff_chunk.riff");
-    try std.testing.expectEqualSlices(u8, chunk_file, list.items);
+    try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
 }
 
 test "chunk deserialization" {
