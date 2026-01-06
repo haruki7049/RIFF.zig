@@ -201,7 +201,7 @@ pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) (ToChunkListEr
 }
 
 /// Internal helper function to parse a sequence of chunks from binary data.
-/// Used by `from_slice` to parse the contents of LIST and RIFF chunks.
+/// Used by `read` to parse the contents of LIST and RIFF chunks.
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating chunk structures.
