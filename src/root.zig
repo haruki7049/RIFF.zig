@@ -44,13 +44,14 @@
 //! // Parse from file
 //! const data = try std.fs.cwd().readFileAlloc(allocator, "input.wav", 1024 * 1024);
 //! defer allocator.free(data);
-//! const parsed = try riff.from_slice(allocator, data);
+//! var reader = std.Io.Reader.fixed(data);
+//! const parsed = try riff.read(allocator, &reader);
 //! defer parsed.deinit(allocator);
 //! ```
 //!
 //! ## API Functions
 //!
-//! - `from_slice`: Parse a RIFF chunk from binary data
+//! - `read`: Parse a RIFF chunk from a reader
 //! - `write`: Serialize a RIFF chunk to a writer
 //! - `Chunk.deinit`: Free allocated memory for a chunk and its children
 
