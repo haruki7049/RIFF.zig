@@ -47,7 +47,7 @@ pub const Error = error{
 /// Serialization follows: Header (4 bytes) + Size (4 bytes, LE) + Data.
 pub fn to_writer(chunk: Chunk, writer: anytype) !void {
     switch (chunk) {
-        .basic => |b| {
+        .chunk => |b| {
             try writer.writeAll(&b.four_cc);
             try writer.writeInt(u32, @intCast(b.data.len), .little);
             try writer.writeAll(b.data);
@@ -93,7 +93,7 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
         const data_end = 8 + size;
         if (bytes.len < data_end) return error.SizeMismatch;
         const data = try allocator.dupe(u8, bytes[8..data_end]);
-        return Chunk{ .basic = .{ .four_cc = id.*, .data = data } };
+        return Chunk{ .chunk = .{ .four_cc = id.*, .data = data } };
     }
 }
 
@@ -113,8 +113,6 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
-        // Recursively handle LIST or nested structures if necessary,
-        // but here we follow glriff's basic to_chunk_list logic.
         const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
         try list.append(Chunk{ .basic = .{ .four_cc = id.*, .data = chunk_data } });
 
