@@ -120,7 +120,10 @@ pub const ToChunkListError = error{
 ///   - `allocator`: Memory allocator used for temporary buffers during serialization.
 ///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
 ///
-/// Returns: `void` on success, or an error from `std.Io.Writer.Error` if writing fails.
+/// Returns: `void` on success.
+///
+/// Errors:
+///   - Writer errors (including memory allocation failures) from `std.Io.Writer.Error`.
 pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (chunk) {
         .chunk => |b| {
@@ -144,12 +147,12 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Wri
             defer w.deinit();
             for (r.chunks) |child| try to_writer(child, allocator, &w.writer);
 
-            const writtern_bytes = w.written();
+            const written_bytes = w.written();
 
             try writer.writeAll("RIFF");
-            try writer.writeInt(u32, @intCast(writtern_bytes.len + 4), .little);
+            try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
             try writer.writeAll(&r.four_cc.inner);
-            try writer.writeAll(writtern_bytes);
+            try writer.writeAll(written_bytes);
         },
     }
 }
