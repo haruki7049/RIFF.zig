@@ -21,6 +21,10 @@
 //! const std = @import("std");
 //! const riff = @import("riff_zig");
 //!
+//! var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//! defer _ = gpa.deinit();
+//! const allocator = gpa.allocator();
+//!
 //! // Create a WAVE file structure
 //! const format_data = "..."; // Your format chunk data
 //! const audio_data = "...";  // Your audio sample data
