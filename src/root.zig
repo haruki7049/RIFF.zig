@@ -45,7 +45,7 @@ pub const Error = error{
 
 /// Converts a RIFF chunk to its binary representation.
 /// Serialization follows: Header (4 bytes) + Size (4 bytes, LE) + Data.
-pub fn to_writer(chunk: Chunk, writer: anytype) !void {
+pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !void {
     switch (chunk) {
         .chunk => |b| {
             try writer.writeAll(&b.four_cc);
@@ -53,18 +53,18 @@ pub fn to_writer(chunk: Chunk, writer: anytype) !void {
             try writer.writeAll(b.data);
         },
         .list => |l| {
-            var buf = std.ArrayList(u8).init(std.heap.page_allocator);
-            defer buf.deinit();
-            for (l) |child| try to_writer(child, buf.writer());
+            var buf: std.array_list.Aligned(u8, null) = .empty;
+            defer buf.deinit(allocator);
+            for (l) |child| try to_writer(child, allocator, buf.writer(allocator));
 
             try writer.writeAll("LIST");
             try writer.writeInt(u32, @intCast(buf.items.len), .little);
             try writer.writeAll(buf.items);
         },
         .riff => |r| {
-            var buf = std.ArrayList(u8).init(std.heap.page_allocator);
-            defer buf.deinit();
-            for (r.chunks) |child| try to_writer(child, buf.writer());
+            var buf: std.array_list.Aligned(u8, null) = .empty;
+            defer buf.deinit(allocator);
+            for (r.chunks) |child| try to_writer(child, allocator, buf.writer(allocator));
 
             try writer.writeAll("RIFF");
             try writer.writeInt(u32, @intCast(buf.items.len + 4), .little);
@@ -98,10 +98,10 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
 }
 
 fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.mem.Allocator.Error)![]const Chunk {
-    var list = std.ArrayList(Chunk).init(allocator);
+    var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
         for (list.items) |c| c.deinit(allocator);
-        list.deinit();
+        list.deinit(allocator);
     }
 
     var pos: usize = 0;
@@ -118,7 +118,8 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.
 
         pos = next_pos;
     }
-    return list.toOwnedSlice();
+
+    return list.toOwnedSlice(allocator);
 }
 
 test "Wave" {
@@ -131,4 +132,46 @@ test "Wave" {
             },
         },
     };
+}
+
+test "chunk serialization" {
+    const allocator = std.testing.allocator;
+
+    const chunk = Chunk{ .chunk = .{
+        .four_cc = "fmt ".*,
+        .data = "EXAMPLE_DATA",
+    } };
+
+    var list: std.array_list.Aligned(u8, null) = blk: {
+        var list: std.array_list.Aligned(u8, null) = .empty;
+        errdefer list.deinit(allocator);
+
+        try to_writer(chunk, allocator, list.writer(allocator));
+        break :blk list;
+    };
+    defer list.deinit(allocator);
+
+    const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
+    try std.testing.expectEqualSlices(u8, expected, list.items);
+}
+
+test "list_chunk serialization" {
+    const allocator = std.testing.allocator;
+
+    const list_chunk = Chunk{ .list = &.{
+        .{ .chunk = .{ .four_cc = "fmt ".*, .data = "EXAMPLE_DATA" } },
+        .{ .chunk = .{ .four_cc = "fmt ".*, .data = "EXAMPLE_DATA" } },
+    } };
+
+    var list: std.array_list.Aligned(u8, null) = blk: {
+        var list: std.array_list.Aligned(u8, null) = .empty;
+        errdefer list.deinit(allocator);
+
+        try to_writer(list_chunk, allocator, list.writer(allocator));
+        break :blk list;
+    };
+    defer list.deinit(allocator);
+
+    const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
+    try std.testing.expectEqualSlices(u8, expected, list.items);
 }
