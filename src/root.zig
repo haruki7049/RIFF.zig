@@ -39,7 +39,7 @@
 //! // Serialize to file
 //! const file = try std.fs.cwd().createFile("output.wav", .{});
 //! defer file.close();
-//! try riff.to_writer(wave_chunk, allocator, file.writer());
+//! try riff.write(wave_chunk, allocator, file.writer());
 //!
 //! // Parse from file
 //! const data = try std.fs.cwd().readFileAlloc(allocator, "input.wav", 1024 * 1024);
@@ -51,7 +51,7 @@
 //! ## API Functions
 //!
 //! - `from_slice`: Parse a RIFF chunk from binary data
-//! - `to_writer`: Serialize a RIFF chunk to a writer
+//! - `write`: Serialize a RIFF chunk to a writer
 //! - `Chunk.deinit`: Free allocated memory for a chunk and its children
 
 const std = @import("std");
@@ -124,7 +124,7 @@ pub const ToChunkListError = error{
 ///
 /// Errors:
 ///   - Writer errors (including memory allocation failures) from `std.Io.Writer.Error`.
-pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     switch (chunk) {
         .chunk => |b| {
             try writer.writeAll(&b.four_cc.inner);
@@ -134,7 +134,7 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Wri
         .list => |l| {
             var w = std.Io.Writer.Allocating.init(allocator);
             defer w.deinit();
-            for (l) |child| try to_writer(child, allocator, &w.writer);
+            for (l) |child| try write(child, allocator, &w.writer);
 
             const written_bytes = w.written();
 
@@ -145,7 +145,7 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Wri
         .riff => |r| {
             var w = std.Io.Writer.Allocating.init(allocator);
             defer w.deinit();
-            for (r.chunks) |child| try to_writer(child, allocator, &w.writer);
+            for (r.chunks) |child| try write(child, allocator, &w.writer);
 
             const written_bytes = w.written();
 
@@ -253,7 +253,7 @@ test "chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try to_writer(chunk, allocator, &w.writer);
+    try write(chunk, allocator, &w.writer);
     const chunk_data = w.written();
 
     const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
@@ -273,7 +273,7 @@ test "list_chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try to_writer(list_chunk, allocator, &w.writer);
+    try write(list_chunk, allocator, &w.writer);
     const list_chunk_data: []u8 = w.written();
 
     const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
@@ -296,7 +296,7 @@ test "riff_chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try to_writer(riff_chunk, allocator, &w.writer);
+    try write(riff_chunk, allocator, &w.writer);
     const riff_chunk_data: []u8 = w.written();
 
     const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
