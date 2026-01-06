@@ -158,12 +158,12 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
     }
 }
 
-/// Parses a RIFF chunk from binary data.
+/// Parses a RIFF chunk from a reader.
 /// Supports parsing of basic chunks, LIST chunks, and RIFF container chunks.
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and its data.
-///   - `bytes`: The raw binary data containing a RIFF chunk to parse.
+///   - `reader`: The reader interface to read RIFF chunk data from.
 ///
 /// Returns: A `Chunk` instance representing the parsed data.
 ///
