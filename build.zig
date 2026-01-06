@@ -4,23 +4,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Library declaration
+    // Library module declaration
     const lib_mod = b.addModule("riff_zig", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const lib = b.addStaticLibrary(.{
+
+    // Library installation
+    const lib = b.addLibrary(.{
+        .linkage = .static,
         .name = "riff_zig",
         .root_module = lib_mod,
     });
     b.installArtifact(lib);
 
-    // Unit tests
+    // Library unit tests
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = lib_mod,
     });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 

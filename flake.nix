@@ -22,7 +22,7 @@
       ];
 
       perSystem =
-        { pkgs, ... }:
+        { pkgs, lib, ... }:
         {
           treefmt = {
             projectRootFile = ".git/config";
@@ -30,31 +30,25 @@
             # Nix
             programs.nixfmt.enable = true;
 
-            # Rust
-            programs.rustfmt.enable = true;
-
-            # TOML
-            programs.taplo.enable = true;
+            # Zig
+            programs.zig.enable = true;
+            settings.formatter.zig.command = lib.getExe pkgs.zig_0_15;
 
             # GitHub Actions
             programs.actionlint.enable = true;
 
             # Markdown
             programs.mdformat.enable = true;
-
-            # ShellScript
-            programs.shellcheck.enable = true;
-            programs.shfmt.enable = true;
           };
 
           devShells.default = pkgs.mkShell {
-            packages = [
-              # Zig
-              pkgs.zig_0_14
-              pkgs.zls
+            nativeBuildInputs = [
+              # Compiler
+              pkgs.zig_0_15
 
-              # Nix
+              # LSP
               pkgs.nil
+              pkgs.zls
             ];
           };
         };
