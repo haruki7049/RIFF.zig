@@ -170,24 +170,31 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 ///   - `InvalidFormat`: If the data is too short or malformed (from `ToChunkListError` or `FourCC.NewError`).
 ///   - `SizeMismatch`: If the chunk size doesn't match the available data (from `ToChunkListError`).
 ///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
-    if (bytes.len < 8) return error.InvalidFormat;
+pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
+    const buffer = reader.buffered();
 
-    const id = bytes[0..4];
-    const size = std.mem.readInt(u32, bytes[4..8], .little);
+    if (buffer.len < 8) return error.InvalidFormat;
+
+    const id = buffer[0..4];
+    const size = std.mem.readInt(u32, buffer[4..8], .little);
 
     if (std.mem.eql(u8, id, "RIFF")) {
-        if (bytes.len < 12) return error.InvalidFormat;
-        const four_cc = bytes[8..12];
-        const chunks = try to_chunk_list(allocator, bytes[12..]);
+        if (buffer.len < 12)
+            return error.InvalidFormat;
+
+        const four_cc = buffer[8..12];
+        const chunks = try to_chunk_list(allocator, buffer[12..]);
         return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else if (std.mem.eql(u8, id, "LIST")) {
-        const chunks = try to_chunk_list(allocator, bytes[8..]);
+        const chunks = try to_chunk_list(allocator, buffer[8..]);
         return Chunk{ .list = chunks };
     } else {
         const data_end = 8 + size;
-        if (bytes.len < data_end) return error.SizeMismatch;
-        const data = try allocator.dupe(u8, bytes[8..data_end]);
+
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
+        const data = try allocator.dupe(u8, buffer[8..data_end]);
         return Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = data } };
     }
 }
@@ -310,8 +317,10 @@ test "chunk deserialization" {
     const allocator = std.testing.allocator;
 
     const chunk_filedata: []const u8 = @embedFile("assets/chunk.riff");
-    const chunk: Chunk = try from_slice(allocator, chunk_filedata);
+    var reader = std.Io.Reader.fixed(chunk_filedata);
+    const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
+
     const expected = Chunk{ .chunk = .{
         .four_cc = try FourCC.new("fmt "),
         .data = "EXAMPLE_DATA",
@@ -324,8 +333,10 @@ test "list_chunk deserialization" {
     const allocator = std.testing.allocator;
 
     const list_chunk_filedata: []const u8 = @embedFile("assets/list_chunk.riff");
-    const list_chunk: Chunk = try from_slice(allocator, list_chunk_filedata);
+    var reader = std.Io.Reader.fixed(list_chunk_filedata);
+    const list_chunk: Chunk = try read(allocator, &reader);
     defer list_chunk.deinit(allocator);
+
     const expected = Chunk{ .list = &.{
         .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
         .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
@@ -338,8 +349,10 @@ test "riff_chunk deserialization" {
     const allocator = std.testing.allocator;
 
     const riff_chunk_filedata: []const u8 = @embedFile("assets/riff_chunk.riff");
-    const riff_chunk: Chunk = try from_slice(allocator, riff_chunk_filedata);
+    var reader = std.Io.Reader.fixed(riff_chunk_filedata);
+    const riff_chunk: Chunk = try read(allocator, &reader);
     defer riff_chunk.deinit(allocator);
+
     const expected = Chunk{ .riff = .{
         .four_cc = try FourCC.new("TEST"),
         .chunks = &.{
