@@ -105,20 +105,11 @@ pub const Chunk = union(enum) {
     }
 };
 
-/// Error types that can occur during RIFF chunk parsing and serialization.
-pub const Error = error{
+pub const ToChunkListError = error{
     /// The input data does not conform to the expected RIFF format structure.
     InvalidFormat,
-    /// The chunk identifier (FourCC) is not recognized or invalid.
-    InvalidId,
-    /// The size field in the chunk header is invalid or inconsistent.
-    InvalidSize,
-    /// The chunk data payload is corrupted or invalid.
-    InvalidData,
     /// The actual data size does not match the size specified in the header.
     SizeMismatch,
-    /// Memory allocation failed during parsing or serialization.
-    OutOfMemory,
 };
 
 /// Converts a RIFF chunk to its binary representation and writes it to a writer.
@@ -172,7 +163,7 @@ pub fn to_writer(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) !v
 ///   - `InvalidFormat`: If the data is too short or malformed.
 ///   - `SizeMismatch`: If the chunk size doesn't match the available data.
 ///   - `OutOfMemory`: If memory allocation fails during parsing.
-pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
+pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
     if (bytes.len < 8) return error.InvalidFormat;
 
     const id = bytes[0..4];
@@ -207,7 +198,7 @@ pub fn from_slice(allocator: std.mem.Allocator, bytes: []const u8) Error!Chunk {
 ///   - `InvalidFormat`: If any chunk header is incomplete.
 ///   - `SizeMismatch`: If any chunk size extends beyond available data.
 ///   - `OutOfMemory`: If memory allocation fails during parsing.
-fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (Error || std.mem.Allocator.Error)![]const Chunk {
+fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
     var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
         for (list.items) |c| c.deinit(allocator);
