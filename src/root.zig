@@ -243,7 +243,7 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
 
 test "Wave" {
     _ = Chunk{ .riff = .{
-        .four_cc = .{ .inner = "WAVE".* },
+        .four_cc = try FourCC.new("WAVE"),
         .chunks = &[_]Chunk{
             .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "" } },
             .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "" } },
