@@ -57,11 +57,28 @@
 
 const std = @import("std");
 
+/// Represents a Four-Character Code (FourCC) identifier used in RIFF chunks.
+/// A FourCC is a 4-byte sequence that identifies the type of a chunk (e.g., "WAVE", "fmt ", "data").
+/// FourCC codes are case-sensitive and commonly used in multimedia file formats.
 pub const FourCC = struct {
+    /// The 4-byte array containing the FourCC identifier.
     inner: [4]u8,
 
-    pub const NewError = error{InvalidFormat};
+    /// Error type for FourCC creation failures.
+    pub const NewError = error{
+        /// Returned when the input string is not exactly 4 bytes long.
+        InvalidFormat,
+    };
 
+    /// Creates a new FourCC from a byte slice.
+    ///
+    /// Parameters:
+    ///   - `four_cc`: A byte slice that must be exactly 4 bytes long.
+    ///
+    /// Returns: A new `FourCC` instance on success.
+    ///
+    /// Errors:
+    ///   - `InvalidFormat`: If the input slice length is not exactly 4 bytes.
     pub fn new(four_cc: []const u8) NewError!FourCC {
         if (four_cc.len != 4)
             return error.InvalidFormat;
@@ -73,24 +90,52 @@ pub const FourCC = struct {
 };
 
 /// Represents a RIFF (Resource Interchange File Format) chunk.
-/// Models the three types of chunks that can appear in RIFF files.
+/// Models the three types of chunks that can appear in RIFF files:
+///
+/// ## Chunk Variants
+///
+/// - **chunk**: A basic RIFF chunk with a FourCC identifier and data payload.
+///   Used for leaf nodes in the RIFF tree structure (e.g., "fmt ", "data" chunks in WAVE files).
+///
+/// - **list**: A LIST chunk containing a list of sub-chunks.
+///   Used to group related chunks together without specifying a file type.
+///
+/// - **riff**: A RIFF chunk representing the root container of a RIFF file.
+///   This is typically the outermost chunk and specifies the file type (e.g., "WAVE", "AVI").
+///
+/// ## Memory Management
+///
+/// Chunks created by `read()` allocate memory that must be freed using `deinit()`.
+/// Chunks created with static data (using `&[_]Chunk{...}` syntax) may not need `deinit()`.
 pub const Chunk = union(enum) {
     /// A basic RIFF chunk with a FourCC identifier and data payload.
     /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
+    /// The `data` field contains the chunk's payload bytes.
     chunk: struct {
         four_cc: FourCC,
         data: []const u8,
     },
     /// A LIST chunk containing a list of sub-chunks.
+    /// LIST chunks are used to group multiple chunks together.
     list: []const Chunk,
     /// A RIFF chunk representing the root container of a RIFF file.
-    /// The `four_cc` specifies the file type (e.g., "WAVE").
+    /// The `four_cc` specifies the file type (e.g., "WAVE" for audio files).
+    /// The `chunks` field contains all sub-chunks within this RIFF container.
     riff: struct {
         four_cc: FourCC,
         chunks: []const Chunk,
     },
 
-    /// Deallocates memory if chunks were dynamically allocated.
+    /// Deallocates memory for this chunk and all of its children recursively.
+    /// This method should be called when you're done using a chunk that was
+    /// created by `read()` or manually allocated with an allocator.
+    ///
+    /// For `.chunk` variants: Frees the data buffer.
+    /// For `.list` variants: Recursively frees all child chunks, then the list itself.
+    /// For `.riff` variants: Recursively frees all child chunks, then the chunks array.
+    ///
+    /// Parameters:
+    ///   - `allocator`: The same allocator that was used to create this chunk.
     pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
         switch (self) {
             .chunk => |b| allocator.free(b.data),
@@ -106,26 +151,55 @@ pub const Chunk = union(enum) {
     }
 };
 
+/// Error types that can occur during RIFF chunk parsing.
 pub const ToChunkListError = error{
     /// The input data does not conform to the expected RIFF format structure.
+    /// This can happen if chunk headers are incomplete or malformed.
     InvalidFormat,
-    /// The actual data size does not match the size specified in the header.
+    /// The actual data size does not match the size specified in the chunk header.
+    /// This typically indicates corrupted or truncated RIFF data.
     SizeMismatch,
 };
 
-/// Converts a RIFF chunk to its binary representation and writes it to a writer.
-/// Serialization follows the RIFF specification: Header (4 bytes FourCC) + Size (4 bytes, little-endian) + Data.
+/// Serializes a RIFF chunk to its binary representation and writes it to a writer.
+///
+/// This function converts a `Chunk` structure into the binary RIFF format according to the specification.
+/// The serialization format depends on the chunk variant:
+///
+/// ## Serialization Format
+///
+/// - **Basic chunk (.chunk)**:
+///   - FourCC identifier (4 bytes)
+///   - Data size (4 bytes, little-endian u32) - size of the data payload only
+///   - Data payload (variable length)
+///
+/// - **LIST chunk (.list)**:
+///   - "LIST" identifier (4 bytes)
+///   - Data size (4 bytes, little-endian u32) - size of all serialized sub-chunks only
+///   - Serialized sub-chunks (variable length)
+///
+/// - **RIFF chunk (.riff)**:
+///   - "RIFF" identifier (4 bytes)
+///   - Data size (4 bytes, little-endian u32) - size of FourCC (4) + all serialized sub-chunks
+///   - File type FourCC (4 bytes, e.g., "WAVE")
+///   - Serialized sub-chunks (variable length)
+///
+/// ## Usage
+///
+/// The function recursively serializes nested chunks. For `.list` and `.riff` variants,
+/// temporary buffers are used to calculate sizes before writing to the output writer.
 ///
 /// Parameters:
-///   - `chunk`: The RIFF chunk to serialize (can be .chunk, .list, or .riff variant).
-///   - `allocator`: Memory allocator used for temporary buffers during serialization.
-///   - `writer`: The writer interface to output the serialized data (e.g., file, buffer).
+///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
+///   - `allocator`: Memory allocator used for temporary buffers during serialization of LIST and RIFF chunks.
+///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.Io.Writer`).
 ///
 /// Returns: `void` on success.
 ///
 /// Errors:
-///   - Writer errors (including memory allocation failures) from `std.Io.Writer.Error`.
-pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+///   - Any error from the writer (e.g., `WriteError`, disk full, connection errors).
+///   - `OutOfMemory`: If temporary buffer allocation fails for LIST or RIFF chunks.
+pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerror!void {
     switch (chunk) {
         .chunk => |b| {
             try writer.writeAll(&b.four_cc.inner);
@@ -158,23 +232,53 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
     }
 }
 
-/// Parses a RIFF chunk from a reader.
-/// Supports parsing of basic chunks, LIST chunks, and RIFF container chunks.
+/// Parses a RIFF chunk from a reader containing binary RIFF data.
+///
+/// This function reads binary data from the reader and constructs a `Chunk` structure
+/// representing the parsed RIFF data. The function automatically detects the chunk type
+/// based on the FourCC identifier and handles parsing accordingly.
+///
+/// ## Supported Chunk Types
+///
+/// - **RIFF chunks**: Root container chunks with a file type identifier (e.g., "WAVE", "AVI").
+///   The function expects at least 12 bytes: "RIFF" (4) + size (4) + type FourCC (4).
+///
+/// - **LIST chunks**: Container chunks that hold multiple sub-chunks.
+///   The function expects at least 8 bytes: "LIST" (4) + size (4), followed by sub-chunks.
+///
+/// - **Basic chunks**: Leaf chunks with a FourCC identifier and data payload.
+///   The function expects at least 8 bytes: FourCC (4) + size (4), followed by data.
+///
+/// ## Memory Allocation
+///
+/// The function allocates memory for:
+/// - Chunk data payloads (copied from the reader buffer)
+/// - Arrays of sub-chunks for LIST and RIFF containers
+///
+/// All allocated memory must be freed by calling `chunk.deinit(allocator)` when done.
+///
+/// ## Data Format
+///
+/// The reader must provide a buffer with the complete chunk data in little-endian format:
+/// - FourCC identifiers are 4-byte ASCII sequences
+/// - Size fields are 32-bit little-endian unsigned integers
+/// - Data follows immediately after the size field
 ///
 /// Parameters:
-///   - `allocator`: Memory allocator for creating the chunk structure and its data.
-///   - `reader`: The reader interface to read RIFF chunk data from.
+///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
+///   - `reader`: The reader interface to read RIFF chunk binary data from (must have a `buffered()` method).
 ///
-/// Returns: A `Chunk` instance representing the parsed data.
+/// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
 /// Errors:
-///   - `InvalidFormat`: If the data is too short or malformed (from `ToChunkListError` or `FourCC.NewError`).
-///   - `SizeMismatch`: If the chunk size doesn't match the available data (from `ToChunkListError`).
+///   - `InvalidFormat`: If the data buffer is too short (< 8 bytes for basic chunks, < 12 for RIFF chunks) or chunk headers are malformed.
+///   - `SizeMismatch`: If the declared chunk size extends beyond the available data in the buffer.
 ///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
+pub fn read(allocator: std.mem.Allocator, reader: anytype) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
     const buffer = reader.buffered();
 
-    if (buffer.len < 8) return error.InvalidFormat;
+    if (buffer.len < 8)
+        return error.InvalidFormat;
 
     const id = buffer[0..4];
     const size = std.mem.readInt(u32, buffer[4..8], .little);
