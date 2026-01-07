@@ -57,11 +57,28 @@
 
 const std = @import("std");
 
+/// Represents a Four-Character Code (FourCC) identifier used in RIFF chunks.
+/// A FourCC is a 4-byte sequence that identifies the type of a chunk (e.g., "WAVE", "fmt ", "data").
+/// FourCC codes are case-sensitive and commonly used in multimedia file formats.
 pub const FourCC = struct {
+    /// The 4-byte array containing the FourCC identifier.
     inner: [4]u8,
 
-    pub const NewError = error{InvalidFormat};
+    /// Error type for FourCC creation failures.
+    pub const NewError = error{
+        /// Returned when the input string is not exactly 4 bytes long.
+        InvalidFormat,
+    };
 
+    /// Creates a new FourCC from a byte slice.
+    ///
+    /// Parameters:
+    ///   - `four_cc`: A byte slice that must be exactly 4 bytes long.
+    ///
+    /// Returns: A new `FourCC` instance on success.
+    ///
+    /// Errors:
+    ///   - `InvalidFormat`: If the input slice length is not exactly 4 bytes.
     pub fn new(four_cc: []const u8) NewError!FourCC {
         if (four_cc.len != 4)
             return error.InvalidFormat;
@@ -73,24 +90,52 @@ pub const FourCC = struct {
 };
 
 /// Represents a RIFF (Resource Interchange File Format) chunk.
-/// Models the three types of chunks that can appear in RIFF files.
+/// Models the three types of chunks that can appear in RIFF files:
+///
+/// ## Chunk Variants
+///
+/// - **chunk**: A basic RIFF chunk with a FourCC identifier and data payload.
+///   Used for leaf nodes in the RIFF tree structure (e.g., "fmt ", "data" chunks in WAVE files).
+///
+/// - **list**: A LIST chunk containing a list of sub-chunks.
+///   Used to group related chunks together without specifying a file type.
+///
+/// - **riff**: A RIFF chunk representing the root container of a RIFF file.
+///   This is typically the outermost chunk and specifies the file type (e.g., "WAVE", "AVI").
+///
+/// ## Memory Management
+///
+/// Chunks created by `read()` allocate memory that must be freed using `deinit()`.
+/// Chunks created with static data (using `&[_]Chunk{...}` syntax) may not need `deinit()`.
 pub const Chunk = union(enum) {
     /// A basic RIFF chunk with a FourCC identifier and data payload.
     /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
+    /// The `data` field contains the chunk's payload bytes.
     chunk: struct {
         four_cc: FourCC,
         data: []const u8,
     },
     /// A LIST chunk containing a list of sub-chunks.
+    /// LIST chunks are used to group multiple chunks together.
     list: []const Chunk,
     /// A RIFF chunk representing the root container of a RIFF file.
-    /// The `four_cc` specifies the file type (e.g., "WAVE").
+    /// The `four_cc` specifies the file type (e.g., "WAVE" for audio files).
+    /// The `chunks` field contains all sub-chunks within this RIFF container.
     riff: struct {
         four_cc: FourCC,
         chunks: []const Chunk,
     },
 
-    /// Deallocates memory if chunks were dynamically allocated.
+    /// Deallocates memory for this chunk and all of its children recursively.
+    /// This method should be called when you're done using a chunk that was
+    /// created by `read()` or manually allocated with an allocator.
+    ///
+    /// For `.chunk` variants: Frees the data buffer.
+    /// For `.list` variants: Recursively frees all child chunks, then the list itself.
+    /// For `.riff` variants: Recursively frees all child chunks, then the chunks array.
+    ///
+    /// Parameters:
+    ///   - `allocator`: The same allocator that was used to create this chunk.
     pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
         switch (self) {
             .chunk => |b| allocator.free(b.data),
@@ -106,10 +151,13 @@ pub const Chunk = union(enum) {
     }
 };
 
+/// Error types that can occur during RIFF chunk parsing.
 pub const ToChunkListError = error{
     /// The input data does not conform to the expected RIFF format structure.
+    /// This can happen if chunk headers are incomplete or malformed.
     InvalidFormat,
-    /// The actual data size does not match the size specified in the header.
+    /// The actual data size does not match the size specified in the chunk header.
+    /// This typically indicates corrupted or truncated RIFF data.
     SizeMismatch,
 };
 
