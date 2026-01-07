@@ -125,7 +125,7 @@ pub const ToChunkListError = error{
 ///
 /// Errors:
 ///   - Writer errors (including memory allocation failures) from `std.Io.Writer.Error`.
-pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerror!void {
     switch (chunk) {
         .chunk => |b| {
             try writer.writeAll(&b.four_cc.inner);
@@ -171,10 +171,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 ///   - `InvalidFormat`: If the data is too short or malformed (from `ToChunkListError` or `FourCC.NewError`).
 ///   - `SizeMismatch`: If the chunk size doesn't match the available data (from `ToChunkListError`).
 ///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
+pub fn read(allocator: std.mem.Allocator, reader: anytype) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
     const buffer = reader.buffered();
 
-    if (buffer.len < 8) return error.InvalidFormat;
+    if (buffer.len < 8)
+        return error.InvalidFormat;
 
     const id = buffer[0..4];
     const size = std.mem.readInt(u32, buffer[4..8], .little);
