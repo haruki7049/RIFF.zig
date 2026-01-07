@@ -170,17 +170,17 @@ pub const ToChunkListError = error{
 ///
 /// - **Basic chunk (.chunk)**:
 ///   - FourCC identifier (4 bytes)
-///   - Data size (4 bytes, little-endian u32)
+///   - Data size (4 bytes, little-endian u32) - size of the data payload only
 ///   - Data payload (variable length)
 ///
 /// - **LIST chunk (.list)**:
 ///   - "LIST" identifier (4 bytes)
-///   - Total size of all sub-chunks (4 bytes, little-endian u32)
+///   - Data size (4 bytes, little-endian u32) - size of all serialized sub-chunks only
 ///   - Serialized sub-chunks (variable length)
 ///
 /// - **RIFF chunk (.riff)**:
 ///   - "RIFF" identifier (4 bytes)
-///   - Total size including FourCC and sub-chunks (4 bytes, little-endian u32)
+///   - Data size (4 bytes, little-endian u32) - size of FourCC (4) + all serialized sub-chunks
 ///   - File type FourCC (4 bytes, e.g., "WAVE")
 ///   - Serialized sub-chunks (variable length)
 ///
