@@ -192,7 +192,7 @@ pub const ToChunkListError = error{
 /// Parameters:
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
 ///   - `allocator`: Memory allocator used for temporary buffers during serialization of LIST and RIFF chunks.
-///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.io.bufferedWriter()`).
+///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.io.Writer`).
 ///
 /// Returns: `void` on success.
 ///
