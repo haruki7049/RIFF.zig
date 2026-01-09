@@ -23,6 +23,18 @@
 
       perSystem =
         { pkgs, lib, ... }:
+        let
+          riff_zig = pkgs.stdenv.mkDerivation {
+            name = "RIFF.zig";
+            src = lib.cleanSource ./.;
+
+            nativeBuildInputs = [
+              pkgs.zig_0_15.hook
+            ];
+
+            doCheck = true;
+          };
+        in
         {
           treefmt = {
             projectRootFile = ".git/config";
@@ -39,6 +51,15 @@
 
             # Markdown
             programs.mdformat.enable = true;
+          };
+
+          packages = {
+            inherit riff_zig;
+            default = riff_zig;
+          };
+
+          checks = {
+            inherit riff_zig;
           };
 
           devShells.default = pkgs.mkShell {
