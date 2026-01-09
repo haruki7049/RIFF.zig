@@ -36,10 +36,7 @@ Then in your `build.zig`:
 
 ```zig
 // Import the riff_zig module
-const riff_zig = b.dependency("riff_zig", .{
-    .target = target,
-    .optimize = optimize,
-});
+const riff_zig = b.dependency("riff_zig", .{});
 // Add the module to your executable
 exe.root_module.addImport("riff_zig", riff_zig.module("riff_zig"));
 ```
