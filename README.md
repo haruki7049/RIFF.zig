@@ -6,9 +6,9 @@ RIFF (Resource Interchange File Format) parser and serializer library for Zig.
 
 - **Parse and Serialize**: Full support for reading and writing RIFF format files.
 - **Support for Multiple Chunk Types**:
-- **Basic Chunks**: Simple data containers with a FourCC and payload.
-- **LIST Chunks**: Containers for grouping multiple sub-chunks.
-- **RIFF Chunks**: The root container defining the file type (e.g., WAVE, AVI).
+  - **Basic Chunks**: Simple data containers with a FourCC and payload.
+  - **LIST Chunks**: Containers for grouping multiple sub-chunks.
+  - **RIFF Chunks**: The root container defining the file type (e.g., WAVE, AVI).
 - **Zig Native**: Designed for Zig 0.15.2+, leveraging its memory management and error handling.
 
 ## Installation
