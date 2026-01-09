@@ -11,6 +11,10 @@ RIFF (Resource Interchange File Format) parser and serializer library for Zig.
   - **RIFF Chunks**: The root container defining the file type (e.g., WAVE, AVI).
 - **Zig Native**: Designed for Zig 0.15.2+, leveraging its memory management and error handling.
 
+## Documents
+
+https://haruki7049.github.io/RIFF.zig
+
 ## Installation
 
 Add `riff_zig` to your `build.zig.zon` dependencies:
