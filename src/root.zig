@@ -29,10 +29,10 @@
 //! const format_data = "..."; // Your format chunk data
 //! const audio_data = "...";  // Your audio sample data
 //! const wave_chunk = riff.Chunk{ .riff = .{
-//!     .four_cc = "WAVE".*,
+//!     .four_cc = riff.FourCC.new("WAVE"),
 //!     .chunks = &[_]riff.Chunk{
-//!         .{ .chunk = .{ .four_cc = "fmt ".*, .data = format_data } },
-//!         .{ .chunk = .{ .four_cc = "data".*, .data = audio_data } },
+//!         .{ .chunk = .{ .four_cc = riff.FourCC.new("fmt "), .data = format_data } },
+//!         .{ .chunk = .{ .four_cc = riff.FourCC.new("data"), .data = audio_data } },
 //!     },
 //! }};
 //!
