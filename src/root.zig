@@ -271,10 +271,8 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 /// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
 /// Errors:
-///   - `InvalidFormat`: If the data buffer is too short (< 8 bytes for basic chunks, < 12 for RIFF chunks) or chunk headers are malformed.
-///   - `SizeMismatch`: If the declared chunk size extends beyond the available data in the buffer.
-///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-pub fn read(allocator: std.mem.Allocator, reader: anytype) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)!Chunk {
+///   - Any error from the reader.
+pub fn read(allocator: std.mem.Allocator, reader: anytype) anyerror!Chunk {
     const buffer = reader.buffered();
 
     if (buffer.len < 8)
