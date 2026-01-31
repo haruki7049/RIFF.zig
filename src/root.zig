@@ -468,3 +468,19 @@ test "riff_chunk deserialization" {
 
     try std.testing.expectEqualDeep(expected, riff_chunk);
 }
+
+test "Webp deserialization" {
+    const allocator = std.testing.allocator;
+
+    const filedata: []const u8 = @embedFile("assets/test_DJ.webp");
+    var reader = std.Io.Reader.fixed(filedata);
+    const riff_chunk: Chunk = try read(allocator, &reader);
+    defer riff_chunk.deinit(allocator);
+
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("WEBP"),
+        .chunks = &.{},
+    } };
+
+    try std.testing.expectEqualDeep(expected, riff_chunk);
+}
