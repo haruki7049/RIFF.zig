@@ -326,7 +326,24 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
 
     var pos: usize = 0;
     while (pos < bytes.len) {
-        if (pos + 8 > bytes.len) return error.InvalidFormat;
+        // Need at least 8 bytes for chunk header (FourCC + size)
+        if (pos + 8 > bytes.len) {
+            // If we have leftover bytes that can't form a valid chunk header,
+            // this is not necessarily an error - it could be padding
+            // But we should check if there are any non-zero bytes
+            var has_data = false;
+            for (bytes[pos..]) |b| {
+                if (b != 0) {
+                    has_data = true;
+                    break;
+                }
+            }
+            if (has_data) {
+                return error.InvalidFormat;
+            }
+            break;
+        }
+
         const id = bytes[pos .. pos + 4][0..4];
         const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
         const next_pos = pos + 8 + size;
@@ -463,6 +480,28 @@ test "riff_chunk deserialization" {
         .chunks = &.{
             .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "" } },
             .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "" } },
+        },
+    } };
+
+    try std.testing.expectEqualDeep(expected, riff_chunk);
+}
+
+test "Webp deserialization" {
+    const allocator = std.testing.allocator;
+    const assertion_data = @import("./assertion_data.zig");
+
+    const filedata: []const u8 = @embedFile("assets/test_DJ.webp");
+    var reader = std.Io.Reader.fixed(filedata);
+    const riff_chunk: Chunk = try read(allocator, &reader);
+    defer riff_chunk.deinit(allocator);
+
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("WEBP"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8X"), .data = assertion_data.VP8X.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8 "), .data = assertion_data.VP8.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("EXIF"), .data = assertion_data.EXIF.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("XMP "), .data = assertion_data.XMP.data } },
         },
     } };
 
