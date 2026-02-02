@@ -435,6 +435,29 @@ test "riff_chunk serialization" {
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
 }
 
+test "Webp serialization" {
+    const allocator = std.testing.allocator;
+    const assertion_data = @import("./assertion_data.zig");
+
+    const webp = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("WEBP"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8X"), .data = assertion_data.VP8X.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8 "), .data = assertion_data.VP8.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("EXIF"), .data = assertion_data.EXIF.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("XMP "), .data = assertion_data.XMP.data } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(webp, allocator, &w.writer);
+    const webp_data: []u8 = w.written();
+
+    const webp_file: []const u8 = @embedFile("assets/test_DJ.webp");
+    try std.testing.expectEqualSlices(u8, webp_file, webp_data);
+}
+
 test "chunk deserialization" {
     const allocator = std.testing.allocator;
 
