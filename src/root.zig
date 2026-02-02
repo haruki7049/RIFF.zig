@@ -205,6 +205,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             try writer.writeAll(&b.four_cc.inner);
             try writer.writeInt(u32, @intCast(b.data.len), .little);
             try writer.writeAll(b.data);
+
+            // Add padding byte if data size is odd
+            if (b.data.len % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
         .list => |l| {
             var w = std.Io.Writer.Allocating.init(allocator);
@@ -216,6 +221,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             try writer.writeAll("LIST");
             try writer.writeInt(u32, @intCast(written_bytes.len), .little);
             try writer.writeAll(written_bytes);
+
+            // Add padding byte if total data size is odd
+            if (written_bytes.len % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
         .riff => |r| {
             var w = std.Io.Writer.Allocating.init(allocator);
@@ -223,11 +233,17 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             for (r.chunks) |child| try write(child, allocator, &w.writer);
 
             const written_bytes = w.written();
+            const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
 
             try writer.writeAll("RIFF");
             try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
             try writer.writeAll(&r.four_cc.inner);
             try writer.writeAll(written_bytes);
+
+            // Add padding byte if total data size is odd
+            if (total_data_size % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
     }
 }
