@@ -205,6 +205,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             try writer.writeAll(&b.four_cc.inner);
             try writer.writeInt(u32, @intCast(b.data.len), .little);
             try writer.writeAll(b.data);
+
+            // Add padding byte if data size is odd
+            if (b.data.len % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
         .list => |l| {
             var w = std.Io.Writer.Allocating.init(allocator);
@@ -216,6 +221,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             try writer.writeAll("LIST");
             try writer.writeInt(u32, @intCast(written_bytes.len), .little);
             try writer.writeAll(written_bytes);
+
+            // Add padding byte if total data size is odd
+            if (written_bytes.len % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
         .riff => |r| {
             var w = std.Io.Writer.Allocating.init(allocator);
@@ -223,11 +233,17 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
             for (r.chunks) |child| try write(child, allocator, &w.writer);
 
             const written_bytes = w.written();
+            const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
 
             try writer.writeAll("RIFF");
             try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
             try writer.writeAll(&r.four_cc.inner);
             try writer.writeAll(written_bytes);
+
+            // Add padding byte if total data size is odd
+            if (total_data_size % 2 == 1) {
+                try writer.writeByte(0);
+            }
         },
     }
 }
@@ -324,7 +340,24 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
 
     var pos: usize = 0;
     while (pos < bytes.len) {
-        if (pos + 8 > bytes.len) return error.InvalidFormat;
+        // Need at least 8 bytes for chunk header (FourCC + size)
+        if (pos + 8 > bytes.len) {
+            // If we have leftover bytes that can't form a valid chunk header,
+            // this is not necessarily an error - it could be padding
+            // But we should check if there are any non-zero bytes
+            var has_data = false;
+            for (bytes[pos..]) |b| {
+                if (b != 0) {
+                    has_data = true;
+                    break;
+                }
+            }
+            if (has_data) {
+                return error.InvalidFormat;
+            }
+            break;
+        }
+
         const id = bytes[pos .. pos + 4][0..4];
         const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
         const next_pos = pos + 8 + size;
@@ -416,6 +449,29 @@ test "riff_chunk serialization" {
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
 }
 
+test "Webp serialization" {
+    const allocator = std.testing.allocator;
+    const assertion_data = @import("./assertion_data.zig");
+
+    const webp = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("WEBP"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8X"), .data = assertion_data.VP8X.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8 "), .data = assertion_data.VP8.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("EXIF"), .data = assertion_data.EXIF.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("XMP "), .data = assertion_data.XMP.data } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(webp, allocator, &w.writer);
+    const webp_data: []u8 = w.written();
+
+    const webp_file: []const u8 = @embedFile("assets/test_DJ.webp");
+    try std.testing.expectEqualSlices(u8, webp_file, webp_data);
+}
+
 test "chunk deserialization" {
     const allocator = std.testing.allocator;
 
@@ -461,6 +517,28 @@ test "riff_chunk deserialization" {
         .chunks = &.{
             .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "" } },
             .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "" } },
+        },
+    } };
+
+    try std.testing.expectEqualDeep(expected, riff_chunk);
+}
+
+test "Webp deserialization" {
+    const allocator = std.testing.allocator;
+    const assertion_data = @import("./assertion_data.zig");
+
+    const filedata: []const u8 = @embedFile("assets/test_DJ.webp");
+    var reader = std.Io.Reader.fixed(filedata);
+    const riff_chunk: Chunk = try read(allocator, &reader);
+    defer riff_chunk.deinit(allocator);
+
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("WEBP"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8X"), .data = assertion_data.VP8X.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("VP8 "), .data = assertion_data.VP8.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("EXIF"), .data = assertion_data.EXIF.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("XMP "), .data = assertion_data.XMP.data } },
         },
     } };
 
