@@ -13,7 +13,7 @@ RIFF (Resource Interchange File Format) parser and serializer library for Zig.
 
 ## Documents
 
-https://haruki7049.github.io/RIFF.zig
+For the main branch documentations, see [haruki7049.github.io/RIFF.zig](https://haruki7049.github.io/RIFF.zig).
 
 ## Installation
 
@@ -80,15 +80,6 @@ pub fn main() !void {
 - `riff.read(allocator, reader)`: Parses a RIFF chunk from a binary stream.
 - `riff.write(chunk, allocator, writer)`: Serializes a chunk to binary format.
 - `Chunk.deinit(allocator)`: Recursively frees memory allocated for a chunk.
-
-## Development
-
-This project uses [Nix](https://nixos.org/) for the development environment.
-
-```sh
-nix develop
-zig build test
-```
 
 ## License
 
