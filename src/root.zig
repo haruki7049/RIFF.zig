@@ -553,6 +553,22 @@ test "riff_chunk_has_list deserialization" {
     try std.testing.expectEqualDeep(expected, chunk);
 }
 
+test "FluidR3_GM2-2.sf2 deserialization" {
+    const allocator = std.testing.allocator;
+
+    const chunk_filedata: []const u8 = @embedFile("assets/FluidR3_GM2-2.sf2");
+    var reader = std.Io.Reader.fixed(chunk_filedata);
+    const chunk: Chunk = try read(allocator, &reader);
+    defer chunk.deinit(allocator);
+
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("sfbk"),
+        .chunks = &.{},
+    } };
+
+    try std.testing.expectEqualDeep(expected, chunk);
+}
+
 test "Webp deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = @import("./assertion_data.zig");
