@@ -115,9 +115,13 @@ pub const Chunk = union(enum) {
         four_cc: FourCC,
         data: []const u8,
     },
-    /// A LIST chunk containing a list of sub-chunks.
-    /// LIST chunks are used to group multiple chunks together.
-    list: []const Chunk,
+    /// A LIST chunk containing a type identifier and a list of sub-chunks.
+    /// LIST chunks are used to group multiple chunks together under a named type
+    /// (e.g., "INFO" for metadata, "sdta" for sample data in SoundFont files).
+    list: struct {
+        four_cc: FourCC,
+        chunks: []const Chunk,
+    },
     /// A RIFF chunk representing the root container of a RIFF file.
     /// The `four_cc` specifies the file type (e.g., "WAVE" for audio files).
     /// The `chunks` field contains all sub-chunks within this RIFF container.
@@ -131,7 +135,7 @@ pub const Chunk = union(enum) {
     /// created by `read()` or manually allocated with an allocator.
     ///
     /// For `.chunk` variants: Frees the data buffer.
-    /// For `.list` variants: Recursively frees all child chunks, then the list itself.
+    /// For `.list` variants: Recursively frees all child chunks, then the chunks array.
     /// For `.riff` variants: Recursively frees all child chunks, then the chunks array.
     ///
     /// Parameters:
@@ -140,8 +144,8 @@ pub const Chunk = union(enum) {
         switch (self) {
             .chunk => |b| allocator.free(b.data),
             .list => |l| {
-                for (l) |child| child.deinit(allocator);
-                allocator.free(l);
+                for (l.chunks) |child| child.deinit(allocator);
+                allocator.free(l.chunks);
             },
             .riff => |r| {
                 for (r.chunks) |child| child.deinit(allocator);
@@ -214,16 +218,18 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
         .list => |l| {
             var w = std.Io.Writer.Allocating.init(allocator);
             defer w.deinit();
-            for (l) |child| try write(child, allocator, &w.writer);
+            for (l.chunks) |child| try write(child, allocator, &w.writer);
 
             const written_bytes = w.written();
+            const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
 
             try writer.writeAll("LIST");
-            try writer.writeInt(u32, @intCast(written_bytes.len), .little);
+            try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
+            try writer.writeAll(&l.four_cc.inner);
             try writer.writeAll(written_bytes);
 
             // Add padding byte if total data size is odd
-            if (written_bytes.len % 2 == 1) {
+            if (total_data_size % 2 == 1) {
                 try writer.writeByte(0);
             }
         },
@@ -305,8 +311,11 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) anyerror!Chunk {
         const chunks = try to_chunk_list(allocator, buffer[12..]);
         return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else if (std.mem.eql(u8, id, "LIST")) {
-        const chunks = try to_chunk_list(allocator, buffer[8..]);
-        return Chunk{ .list = chunks };
+        if (buffer.len < 12)
+            return error.InvalidFormat;
+        const four_cc = buffer[8..12];
+        const chunks = try to_chunk_list(allocator, buffer[12..]);
+        return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else {
         const data_end = 8 + size;
 
@@ -365,12 +374,17 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
         if (next_pos > bytes.len) return error.SizeMismatch;
 
         if (std.mem.eql(u8, id, "LIST")) {
-            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 8 .. next_pos]);
+            if (next_pos < pos + 12) return error.InvalidFormat;
+            const list_type = bytes[pos + 8 .. pos + 12][0..4];
+            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 12 .. next_pos]);
             errdefer {
                 for (sub_chunks) |c| c.deinit(allocator);
                 allocator.free(sub_chunks);
             }
-            try list.append(allocator, Chunk{ .list = sub_chunks });
+            try list.append(allocator, Chunk{ .list = .{
+                .four_cc = try FourCC.new(list_type),
+                .chunks = sub_chunks,
+            } });
         } else {
             const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
             try list.append(allocator, Chunk{ .chunk = .{
@@ -418,9 +432,12 @@ test "chunk serialization" {
 test "list_chunk serialization" {
     const allocator = std.testing.allocator;
 
-    const list_chunk = Chunk{ .list = &.{
-        .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
-        .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+    const list_chunk = Chunk{ .list = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+        },
     } };
 
     var w = std.Io.Writer.Allocating.init(allocator);
@@ -428,7 +445,7 @@ test "list_chunk serialization" {
     try write(list_chunk, allocator, &w.writer);
     const list_chunk_data: []u8 = w.written();
 
-    const expected = "LIST" ++ "\x28\x00\x00\x00" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
+    const expected = "LIST" ++ "\x2c\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, list_chunk_data);
 
     const chunk_file: []const u8 = @embedFile("assets/list_chunk.riff");
@@ -505,9 +522,12 @@ test "list_chunk deserialization" {
     const list_chunk: Chunk = try read(allocator, &reader);
     defer list_chunk.deinit(allocator);
 
-    const expected = Chunk{ .list = &.{
-        .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
-        .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+    const expected = Chunk{ .list = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+        },
     } };
 
     try std.testing.expectEqualDeep(expected, list_chunk);
@@ -543,9 +563,12 @@ test "riff_chunk_has_list deserialization" {
     const expected = Chunk{ .riff = .{
         .four_cc = try FourCC.new("TEST"),
         .chunks = &.{
-            .{ .list = &.{
-                .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
-                .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("TEST"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+                },
             } },
         },
     } };
@@ -561,12 +584,20 @@ test "FluidR3_GM2-2.sf2 deserialization" {
     const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
 
-    const expected = Chunk{ .riff = .{
-        .four_cc = try FourCC.new("sfbk"),
-        .chunks = &.{},
-    } };
+    // Verify root RIFF chunk type is "sfbk" (SoundFont Bank)
+    try std.testing.expectEqual(std.meta.activeTag(chunk), .riff);
+    try std.testing.expectEqualSlices(u8, "sfbk", &chunk.riff.four_cc.inner);
+    try std.testing.expectEqual(@as(usize, 3), chunk.riff.chunks.len);
 
-    try std.testing.expectEqualDeep(expected, chunk);
+    // Verify the 3 LIST sub-chunks: INFO, sdta, pdta
+    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[0]), .list);
+    try std.testing.expectEqualSlices(u8, "INFO", &chunk.riff.chunks[0].list.four_cc.inner);
+
+    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[1]), .list);
+    try std.testing.expectEqualSlices(u8, "sdta", &chunk.riff.chunks[1].list.four_cc.inner);
+
+    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[2]), .list);
+    try std.testing.expectEqualSlices(u8, "pdta", &chunk.riff.chunks[2].list.four_cc.inner);
 }
 
 test "Webp deserialization" {
