@@ -523,6 +523,27 @@ test "riff_chunk deserialization" {
     try std.testing.expectEqualDeep(expected, riff_chunk);
 }
 
+test "riff_chunk_has_list deserialization" {
+    const allocator = std.testing.allocator;
+
+    const chunk_filedata: []const u8 = @embedFile("assets/riff_chunk_has_list.riff");
+    var reader = std.Io.Reader.fixed(chunk_filedata);
+    const chunk: Chunk = try read(allocator, &reader);
+    defer chunk.deinit(allocator);
+
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .list = &.{
+                .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+                .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+            } },
+        },
+    } };
+
+    try std.testing.expectEqualDeep(expected, chunk);
+}
+
 test "Webp deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = @import("./assertion_data.zig");
