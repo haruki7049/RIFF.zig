@@ -364,11 +364,16 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
-        const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
-        try list.append(allocator, Chunk{ .chunk = .{
-            .four_cc = try FourCC.new(id),
-            .data = chunk_data,
-        } });
+        if (std.mem.eql(u8, id, "LIST")) {
+            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 8 .. next_pos]);
+            try list.append(allocator, Chunk{ .list = sub_chunks });
+        } else {
+            const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
+            try list.append(allocator, Chunk{ .chunk = .{
+                .four_cc = try FourCC.new(id),
+                .data = chunk_data,
+            } });
+        }
 
         pos = next_pos;
     }
