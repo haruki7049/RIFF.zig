@@ -366,6 +366,10 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
 
         if (std.mem.eql(u8, id, "LIST")) {
             const sub_chunks = try to_chunk_list(allocator, bytes[pos + 8 .. next_pos]);
+            errdefer {
+                for (sub_chunks) |c| c.deinit(allocator);
+                allocator.free(sub_chunks);
+            }
             try list.append(allocator, Chunk{ .list = sub_chunks });
         } else {
             const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
