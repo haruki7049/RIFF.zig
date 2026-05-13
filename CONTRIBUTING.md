@@ -11,6 +11,10 @@ zig build test
 
 Also, you can use any package manager to installing Ziglang.
 
+### Git LFS
+
+I use Git LFS, so you should use Git LFS to use big size files as SoundFont2.
+
 ### Zig version
 
 I use `Zig 0.15.2` for this project.
