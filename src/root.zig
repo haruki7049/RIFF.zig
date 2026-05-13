@@ -425,7 +425,7 @@ test "chunk serialization" {
     const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, chunk_data);
 
-    const chunk_file: []const u8 = @embedFile("assets/chunk.riff");
+    const chunk_file: []const u8 = @embedFile("assets/riff-files/chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, chunk_data);
 }
 
@@ -448,7 +448,7 @@ test "list_chunk serialization" {
     const expected = "LIST" ++ "\x2c\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
     try std.testing.expectEqualSlices(u8, expected, list_chunk_data);
 
-    const chunk_file: []const u8 = @embedFile("assets/list_chunk.riff");
+    const chunk_file: []const u8 = @embedFile("assets/riff-files/list_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, list_chunk_data);
 }
 
@@ -471,7 +471,7 @@ test "riff_chunk serialization" {
     const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
     try std.testing.expectEqualSlices(u8, expected, riff_chunk_data);
 
-    const chunk_file: []const u8 = @embedFile("assets/riff_chunk.riff");
+    const chunk_file: []const u8 = @embedFile("assets/riff-files/riff_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
 }
 
@@ -494,14 +494,14 @@ test "Webp serialization" {
     try write(webp, allocator, &w.writer);
     const webp_data: []u8 = w.written();
 
-    const webp_file: []const u8 = @embedFile("assets/test_DJ.webp");
+    const webp_file: []const u8 = @embedFile("assets/riff-files/test_DJ.webp");
     try std.testing.expectEqualSlices(u8, webp_file, webp_data);
 }
 
 test "chunk deserialization" {
     const allocator = std.testing.allocator;
 
-    const chunk_filedata: []const u8 = @embedFile("assets/chunk.riff");
+    const chunk_filedata: []const u8 = @embedFile("assets/riff-files/chunk.riff");
     var reader = std.Io.Reader.fixed(chunk_filedata);
     const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
@@ -517,7 +517,7 @@ test "chunk deserialization" {
 test "list_chunk deserialization" {
     const allocator = std.testing.allocator;
 
-    const list_chunk_filedata: []const u8 = @embedFile("assets/list_chunk.riff");
+    const list_chunk_filedata: []const u8 = @embedFile("assets/riff-files/list_chunk.riff");
     var reader = std.Io.Reader.fixed(list_chunk_filedata);
     const list_chunk: Chunk = try read(allocator, &reader);
     defer list_chunk.deinit(allocator);
@@ -536,7 +536,7 @@ test "list_chunk deserialization" {
 test "riff_chunk deserialization" {
     const allocator = std.testing.allocator;
 
-    const riff_chunk_filedata: []const u8 = @embedFile("assets/riff_chunk.riff");
+    const riff_chunk_filedata: []const u8 = @embedFile("assets/riff-files/riff_chunk.riff");
     var reader = std.Io.Reader.fixed(riff_chunk_filedata);
     const riff_chunk: Chunk = try read(allocator, &reader);
     defer riff_chunk.deinit(allocator);
@@ -555,7 +555,7 @@ test "riff_chunk deserialization" {
 test "riff_chunk_has_list deserialization" {
     const allocator = std.testing.allocator;
 
-    const chunk_filedata: []const u8 = @embedFile("assets/riff_chunk_has_list.riff");
+    const chunk_filedata: []const u8 = @embedFile("assets/riff-files/riff_chunk_has_list.riff");
     var reader = std.Io.Reader.fixed(chunk_filedata);
     const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
@@ -580,7 +580,7 @@ test "FluidR3_GM2-2.sf2 deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = @import("./assertion_data.zig");
 
-    const chunk_filedata: []const u8 = @embedFile("assets/FluidR3_GM2-2.sf2");
+    const chunk_filedata: []const u8 = @embedFile("assets/riff-files/FluidR3_GM2-2.sf2");
     var reader = std.Io.Reader.fixed(chunk_filedata);
     const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
@@ -624,7 +624,7 @@ test "Webp deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = @import("./assertion_data.zig");
 
-    const filedata: []const u8 = @embedFile("assets/test_DJ.webp");
+    const filedata: []const u8 = @embedFile("assets/riff-files/test_DJ.webp");
     var reader = std.Io.Reader.fixed(filedata);
     const riff_chunk: Chunk = try read(allocator, &reader);
     defer riff_chunk.deinit(allocator);
