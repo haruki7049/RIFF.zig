@@ -610,7 +610,7 @@ test "FluidR3_GM2-2.sf2 deserialization" {
     const assertion_data = struct {
         pub const sdta = struct {
             pub const smpl = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data");
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
             };
         };
     };
