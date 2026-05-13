@@ -613,6 +613,32 @@ test "FluidR3_GM2-2.sf2 deserialization" {
                 pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
             };
         };
+        pub const pdta = struct {
+            pub const phdr = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
+            };
+            pub const pbag = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
+            };
+            pub const pgen = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
+            };
+            pub const inst = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
+            };
+            pub const ibag = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
+            };
+            pub const imod = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
+            };
+            pub const igen = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
+            };
+            pub const shdr = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
+            };
+        };
     };
 
     const chunk_filedata: []const u8 = @embedFile("assets/riff-files/FluidR3_GM2-2.sf2");
@@ -646,7 +672,15 @@ test "FluidR3_GM2-2.sf2 deserialization" {
             .{ .list = .{
                 .four_cc = try FourCC.new("pdta"),
                 .chunks = &.{
-                    .{ .chunk = .{ .four_cc = try FourCC.new("    "), .data = "" } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("phdr"), .data = assertion_data.pdta.phdr.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pbag"), .data = assertion_data.pdta.pbag.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pmod"), .data = &.{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pgen"), .data = assertion_data.pdta.pgen.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("inst"), .data = assertion_data.pdta.inst.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ibag"), .data = assertion_data.pdta.ibag.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("imod"), .data = assertion_data.pdta.imod.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("igen"), .data = assertion_data.pdta.igen.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("shdr"), .data = assertion_data.pdta.shdr.data } },
                 },
             } },
         },
