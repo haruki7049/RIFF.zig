@@ -478,35 +478,35 @@ test "riff_chunk serialization" {
 test "FluidR3_GM2-2.sf2 serialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const sdta = struct {
-            pub const smpl = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
+        const sdta = struct {
+            const smpl = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
             };
         };
-        pub const pdta = struct {
-            pub const phdr = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
+        const pdta = struct {
+            const phdr = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
             };
-            pub const pbag = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
+            const pbag = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
             };
-            pub const pgen = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
+            const pgen = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
             };
-            pub const inst = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
+            const inst = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
             };
-            pub const ibag = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
+            const ibag = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
             };
-            pub const imod = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
+            const imod = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
             };
-            pub const igen = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
+            const igen = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
             };
-            pub const shdr = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
+            const shdr = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
             };
         };
     };
@@ -586,8 +586,8 @@ test "Webp serialization" {
 test "chunk deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const fmt = struct {
-            pub const data = @embedFile("./assets/chunk-data/chunk.fmt.data");
+        const fmt = struct {
+            const data = @embedFile("./assets/chunk-data/chunk.fmt.data");
         };
     };
 
@@ -607,11 +607,11 @@ test "chunk deserialization" {
 test "list_chunk deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const fmt1 = struct {
-            pub const data = @embedFile("./assets/chunk-data/list.fmt1.data");
+        const fmt1 = struct {
+            const data = @embedFile("./assets/chunk-data/list.fmt1.data");
         };
-        pub const fmt2 = struct {
-            pub const data = @embedFile("./assets/chunk-data/list.fmt2.data");
+        const fmt2 = struct {
+            const data = @embedFile("./assets/chunk-data/list.fmt2.data");
         };
     };
 
@@ -634,11 +634,11 @@ test "list_chunk deserialization" {
 test "riff_chunk deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const fmt = struct {
-            pub const data = @embedFile("./assets/chunk-data/riff_chunk.fmt.data");
+        const fmt = struct {
+            const data = @embedFile("./assets/chunk-data/riff_chunk.fmt.data");
         };
-        pub const data = struct {
-            pub const data = @embedFile("./assets/chunk-data/riff_chunk.data.data");
+        const data = struct {
+            const data = @embedFile("./assets/chunk-data/riff_chunk.data.data");
         };
     };
 
@@ -661,11 +661,11 @@ test "riff_chunk deserialization" {
 test "riff_chunk_has_list deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const fmt1 = struct {
-            pub const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt1.data");
+        const fmt1 = struct {
+            const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt1.data");
         };
-        pub const fmt2 = struct {
-            pub const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt2.data");
+        const fmt2 = struct {
+            const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt2.data");
         };
     };
 
@@ -693,35 +693,35 @@ test "riff_chunk_has_list deserialization" {
 test "FluidR3_GM2-2.sf2 deserialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
-        pub const sdta = struct {
-            pub const smpl = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
+        const sdta = struct {
+            const smpl = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
             };
         };
-        pub const pdta = struct {
-            pub const phdr = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
+        const pdta = struct {
+            const phdr = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
             };
-            pub const pbag = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
+            const pbag = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
             };
-            pub const pgen = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
+            const pgen = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
             };
-            pub const inst = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
+            const inst = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
             };
-            pub const ibag = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
+            const ibag = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
             };
-            pub const imod = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
+            const imod = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
             };
-            pub const igen = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
+            const igen = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
             };
-            pub const shdr = struct {
-                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
+            const shdr = struct {
+                const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
             };
         };
     };
