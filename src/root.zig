@@ -578,26 +578,46 @@ test "riff_chunk_has_list deserialization" {
 
 test "FluidR3_GM2-2.sf2 deserialization" {
     const allocator = std.testing.allocator;
+    const assertion_data = @import("./assertion_data.zig");
 
     const chunk_filedata: []const u8 = @embedFile("assets/FluidR3_GM2-2.sf2");
     var reader = std.Io.Reader.fixed(chunk_filedata);
     const chunk: Chunk = try read(allocator, &reader);
     defer chunk.deinit(allocator);
 
-    // Verify root RIFF chunk type is "sfbk" (SoundFont Bank)
-    try std.testing.expectEqual(std.meta.activeTag(chunk), .riff);
-    try std.testing.expectEqualSlices(u8, "sfbk", &chunk.riff.four_cc.inner);
-    try std.testing.expectEqual(@as(usize, 3), chunk.riff.chunks.len);
+    const expected = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("sfbk"),
+        .chunks = &.{
+            .{ .list = .{
+                .four_cc = try FourCC.new("INFO"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ifil"), .data = &.{ 2, 0, 2, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("INAM"), .data = "Fluid R3 GM" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("isng"), .data = "E-mu 10K1" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("IPRD"), .data = "SBAWE32" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ISFT"), .data = "SFEDT v1.28:SFEDT v1.36:" ++ .{ 0, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICOP"), .data = "Frank Wen 2000-2002" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICRD"), .data = "20th June 2013" ++ .{ 0, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("IENG"), .data = "Frank Wen" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICMT"), .data = "DO NOT REDISTRIBUTE ANY OF THESE SAMPLES. Violin fixed by Church Organist " ++ .{ 0, 0 } } },
+                },
+            } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("sdta"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("smpl"), .data = assertion_data.smpl.data } },
+                },
+            } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("pdta"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("    "), .data = "" } },
+                },
+            } },
+        },
+    } };
 
-    // Verify the 3 LIST sub-chunks: INFO, sdta, pdta
-    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[0]), .list);
-    try std.testing.expectEqualSlices(u8, "INFO", &chunk.riff.chunks[0].list.four_cc.inner);
-
-    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[1]), .list);
-    try std.testing.expectEqualSlices(u8, "sdta", &chunk.riff.chunks[1].list.four_cc.inner);
-
-    try std.testing.expectEqual(std.meta.activeTag(chunk.riff.chunks[2]), .list);
-    try std.testing.expectEqualSlices(u8, "pdta", &chunk.riff.chunks[2].list.four_cc.inner);
+    try std.testing.expectEqualDeep(expected, chunk);
 }
 
 test "Webp deserialization" {
