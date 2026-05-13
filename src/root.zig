@@ -500,6 +500,11 @@ test "Webp serialization" {
 
 test "chunk deserialization" {
     const allocator = std.testing.allocator;
+    const assertion_data = struct {
+        pub const fmt = struct {
+            pub const data = @embedFile("./assets/chunk-data/chunk.fmt.data");
+        };
+    };
 
     const chunk_filedata: []const u8 = @embedFile("assets/riff-files/chunk.riff");
     var reader = std.Io.Reader.fixed(chunk_filedata);
@@ -508,7 +513,7 @@ test "chunk deserialization" {
 
     const expected = Chunk{ .chunk = .{
         .four_cc = try FourCC.new("fmt "),
-        .data = "EXAMPLE_DATA",
+        .data = assertion_data.fmt.data,
     } };
 
     try std.testing.expectEqualDeep(expected, chunk);
@@ -516,6 +521,14 @@ test "chunk deserialization" {
 
 test "list_chunk deserialization" {
     const allocator = std.testing.allocator;
+    const assertion_data = struct {
+        pub const fmt1 = struct {
+            pub const data = @embedFile("./assets/chunk-data/list.fmt1.data");
+        };
+        pub const fmt2 = struct {
+            pub const data = @embedFile("./assets/chunk-data/list.fmt2.data");
+        };
+    };
 
     const list_chunk_filedata: []const u8 = @embedFile("assets/riff-files/list_chunk.riff");
     var reader = std.Io.Reader.fixed(list_chunk_filedata);
@@ -525,8 +538,8 @@ test "list_chunk deserialization" {
     const expected = Chunk{ .list = .{
         .four_cc = try FourCC.new("TEST"),
         .chunks = &.{
-            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
-            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = assertion_data.fmt1.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = assertion_data.fmt2.data } },
         },
     } };
 
@@ -535,6 +548,14 @@ test "list_chunk deserialization" {
 
 test "riff_chunk deserialization" {
     const allocator = std.testing.allocator;
+    const assertion_data = struct {
+        pub const fmt = struct {
+            pub const data = @embedFile("./assets/chunk-data/riff_chunk.fmt.data");
+        };
+        pub const data = struct {
+            pub const data = @embedFile("./assets/chunk-data/riff_chunk.data.data");
+        };
+    };
 
     const riff_chunk_filedata: []const u8 = @embedFile("assets/riff-files/riff_chunk.riff");
     var reader = std.Io.Reader.fixed(riff_chunk_filedata);
@@ -544,8 +565,8 @@ test "riff_chunk deserialization" {
     const expected = Chunk{ .riff = .{
         .four_cc = try FourCC.new("TEST"),
         .chunks = &.{
-            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "" } },
-            .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "" } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = assertion_data.fmt.data } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = assertion_data.data.data } },
         },
     } };
 
@@ -554,6 +575,14 @@ test "riff_chunk deserialization" {
 
 test "riff_chunk_has_list deserialization" {
     const allocator = std.testing.allocator;
+    const assertion_data = struct {
+        pub const fmt1 = struct {
+            pub const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt1.data");
+        };
+        pub const fmt2 = struct {
+            pub const data = @embedFile("./assets/chunk-data/riff_chunk_has_list.fmt2.data");
+        };
+    };
 
     const chunk_filedata: []const u8 = @embedFile("assets/riff-files/riff_chunk_has_list.riff");
     var reader = std.Io.Reader.fixed(chunk_filedata);
@@ -566,8 +595,8 @@ test "riff_chunk_has_list deserialization" {
             .{ .list = .{
                 .four_cc = try FourCC.new("TEST"),
                 .chunks = &.{
-                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
-                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "EXAMPLE_DATA" } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = assertion_data.fmt1.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = assertion_data.fmt2.data } },
                 },
             } },
         },
@@ -578,7 +607,13 @@ test "riff_chunk_has_list deserialization" {
 
 test "FluidR3_GM2-2.sf2 deserialization" {
     const allocator = std.testing.allocator;
-    const assertion_data = @import("./assertion_data.zig");
+    const assertion_data = struct {
+        pub const sdta = struct {
+            pub const smpl = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data");
+            };
+        };
+    };
 
     const chunk_filedata: []const u8 = @embedFile("assets/riff-files/FluidR3_GM2-2.sf2");
     var reader = std.Io.Reader.fixed(chunk_filedata);
@@ -605,7 +640,7 @@ test "FluidR3_GM2-2.sf2 deserialization" {
             .{ .list = .{
                 .four_cc = try FourCC.new("sdta"),
                 .chunks = &.{
-                    .{ .chunk = .{ .four_cc = try FourCC.new("smpl"), .data = assertion_data.smpl.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("smpl"), .data = assertion_data.sdta.smpl.data } },
                 },
             } },
             .{ .list = .{
