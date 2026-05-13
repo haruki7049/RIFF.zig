@@ -475,6 +475,91 @@ test "riff_chunk serialization" {
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
 }
 
+test "FluidR3_GM2-2.sf2 serialization" {
+    const allocator = std.testing.allocator;
+    const assertion_data = struct {
+        pub const sdta = struct {
+            pub const smpl = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.sdta.smpl.data.bin");
+            };
+        };
+        pub const pdta = struct {
+            pub const phdr = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.phdr.data.bin");
+            };
+            pub const pbag = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pbag.data.bin");
+            };
+            pub const pgen = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.pgen.data.bin");
+            };
+            pub const inst = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.inst.data.bin");
+            };
+            pub const ibag = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.ibag.data.bin");
+            };
+            pub const imod = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.imod.data.bin");
+            };
+            pub const igen = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.igen.data.bin");
+            };
+            pub const shdr = struct {
+                pub const data = @embedFile("./assets/chunk-data/FluidR3_GM2-2.sfbk.pdta.shdr.data.bin");
+            };
+        };
+    };
+
+    const soundfont = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("sfbk"),
+        .chunks = &.{
+            .{ .list = .{
+                .four_cc = try FourCC.new("INFO"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ifil"), .data = &.{ 2, 0, 2, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("INAM"), .data = "Fluid R3 GM" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("isng"), .data = "E-mu 10K1" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("IPRD"), .data = "SBAWE32" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ISFT"), .data = "SFEDT v1.28:SFEDT v1.36:" ++ .{ 0, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICOP"), .data = "Frank Wen 2000-2002" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICRD"), .data = "20th June 2013" ++ .{ 0, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("IENG"), .data = "Frank Wen" ++ .{0} } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ICMT"), .data = "DO NOT REDISTRIBUTE ANY OF THESE SAMPLES. Violin fixed by Church Organist " ++ .{ 0, 0 } } },
+                },
+            } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("sdta"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("smpl"), .data = assertion_data.sdta.smpl.data } },
+                },
+            } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("pdta"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("phdr"), .data = assertion_data.pdta.phdr.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pbag"), .data = assertion_data.pdta.pbag.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pmod"), .data = &.{ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 } } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("pgen"), .data = assertion_data.pdta.pgen.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("inst"), .data = assertion_data.pdta.inst.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("ibag"), .data = assertion_data.pdta.ibag.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("imod"), .data = assertion_data.pdta.imod.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("igen"), .data = assertion_data.pdta.igen.data } },
+                    .{ .chunk = .{ .four_cc = try FourCC.new("shdr"), .data = assertion_data.pdta.shdr.data } },
+                },
+            } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(soundfont, allocator, &w.writer);
+    const webp_data: []u8 = w.written();
+
+    const webp_file: []const u8 = @embedFile("assets/riff-files/FluidR3_GM2-2.sf2");
+    try std.testing.expectEqualSlices(u8, webp_file, webp_data);
+}
+
 test "Webp serialization" {
     const allocator = std.testing.allocator;
     const assertion_data = @import("./assertion_data.zig");
