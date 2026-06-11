@@ -17,4 +17,4 @@ I use Git LFS, so you should use Git LFS to use big size files as SoundFont2.
 
 ### Zig version
 
-I use `Zig 0.15.2` for this project.
+I use `Zig 0.16.0` for this project.
