@@ -22,7 +22,7 @@ jobs:
       - name: Checkout LFS
         run: git lfs pull
       - name: Setup Ziglang
-        uses: mlugg/setup-zig@v2.0.5
+        uses: mlugg/setup-zig@v2.2.1
         with:
           version: 0.15.2
       - name: Generate docs
