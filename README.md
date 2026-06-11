@@ -69,9 +69,12 @@ pub fn main() !void {
     // Create an output file
     const file = try std.fs.cwd().createFile("output.wav", .{});
     defer file.close();
+    const buf = try allocator.alloc(u8, 10 * 1024 * 1024); // For now I define this buffer size
+    defer allocator.free(buf);
+    var writer = file.writer(buf);
 
     // Serialize the chunk structure to the file
-    try riff.write(wave_chunk, allocator, file.writer());
+    try riff.write(wave_chunk, allocator, &writer.interface);
 }
 ```
 
