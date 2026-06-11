@@ -17,5 +17,5 @@ jobs:
         run: git lfs pull
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
       - run: zig build test
