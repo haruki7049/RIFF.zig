@@ -5,7 +5,7 @@
 ## Nix inputs (`flake.lock`)
 
 1. Run `nix flake update`.
-1. Run `nix fmt -- --fail-on-change`, `zig build`, and `zig build test` (inside `nix develop` or via direnv).
+1. Run `treefmt --fail-on-change`, `zig build`, and `zig build test` (inside `nix develop` or via direnv).
 1. Commit with `build(flake.lock): nix flake update`.
 
 ## Zig version bumps

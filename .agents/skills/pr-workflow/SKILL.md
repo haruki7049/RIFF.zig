@@ -8,8 +8,8 @@ Before committing or opening a PR, execute the following commands and ensure all
 
 | Task | Command | Description |
 | :--- | :--- | :--- |
-| **Check All Formatting (treefmt)** | `nix fmt -- --fail-on-change` | Verifies formatting across Zig, Nix, GitHub Actions, and Markdown files. `treefmt` is not on `PATH` inside `nix develop` for this repo — always invoke it through the `nix fmt` flake app. |
-| **Format All Files (treefmt)** | `nix fmt` | Auto-formats all files in the repository using treefmt |
+| **Check All Formatting (treefmt)** | `treefmt --fail-on-change` | Verifies formatting across Zig, Nix, GitHub Actions, and Markdown files |
+| **Format All Files (treefmt)** | `treefmt` | Auto-formats all files in the repository using treefmt |
 | **Run All Tests** | `zig build test` | Executes the library unit tests |
 | **Build Library** | `zig build` | Compiles and installs the static library |
 | **Emit API Docs** | `zig build docs` | Generates API documentation (when public API or doc comments change) |
@@ -38,7 +38,7 @@ Ensure the PR description includes:
 
 - **Summary**: Concise overview of changes.
 - **Linked Issue / Closes Statement**: Always include an explicit issue-closing keyword (e.g. `Closes #16`, `Fixes #12`, or `Resolves #5`) when resolving an open issue.
-- **Verification**: Explicitly list executed verification commands (`nix fmt -- --fail-on-change`, `zig build test`, etc.) and their success status.
+- **Verification**: Explicitly list executed verification commands (`treefmt --fail-on-change`, `zig build test`, etc.) and their success status.
 - **Breaking Changes**: Highlight any breaking changes to the public API.
 
 ## 4. Strict Safety & Approval Rules

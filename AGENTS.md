@@ -8,7 +8,7 @@ ______________________________________________________________________
 
 `RIFF.zig` is a low-level RIFF (Resource Interchange File Format) container reader/writer library written in Zig. It has no external Zig package dependencies and is used as a foundation by higher-level projects, such as [`zigggwavvv`](https://github.com/haruki7049/zigggwavvv) (WAV).
 
-- **Development Environment**: Managed with Nix (`flake.nix`), `direnv`, and `treefmt-nix` (via `treefmt-nix`) for formatting Zig, Nix, GitHub Actions, and Markdown files. The `treefmt` binary is **not** on `PATH` inside `nix develop` for this repo; use the `nix fmt` flake app instead (see `.agents/skills/pr-workflow/SKILL.md`).
+- **Development Environment**: Managed with Nix (`flake.nix`), `direnv`, and `treefmt-nix` (via `treefmt-nix`) for formatting Zig, Nix, GitHub Actions, and Markdown files. `treefmt` is available on `PATH` inside `nix develop` (or via direnv) through the default devShell's `inputsFrom`.
 - **Target Language Version**: Zig `0.16.0` (`minimum_zig_version` in `build.zig.zon`). This library has no external Zig package dependencies (`dependencies = {}`).
 - **Directory Structure**:
   - `src/root.zig`: Library entry point (public API, chunk parsing/writing logic and tests).
@@ -24,7 +24,7 @@ ______________________________________________________________________
 - **NEVER AUTO-MERGE TO MAIN**: AI agents **MUST NEVER** merge PRs, execute `git merge`, or directly push commits to the `main` branch autonomously.
 - **NEVER PROPOSE COMMITS OR PUSHES UNPROMPTED**: AI agents **MUST NEVER** prompt the user to commit or push, nor propose commit messages unprompted. When instructed by the user or when creating/updating pull requests on topic branches, agents may execute `git commit` and `git push` directly without seeking confirmation.
 - **Mandatory Human Approval**: AI agents may create branches, create commits, push topic branches, propose PRs, format code, and run test suites, but the final action of merging changes into `main` rests strictly with the human maintainer.
-- **Verification Before Submitting**: All changes must pass `nix fmt -- --fail-on-change`, `zig build`, and `zig build test`.
+- **Verification Before Submitting**: All changes must pass `treefmt --fail-on-change`, `zig build`, and `zig build test`.
 - **Conventional Commits**: Use conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `test:`), optionally with a scope (e.g. `build(flake.lock):`).
 - **Evidence First**: Base all answers and actions on actual file contents and command output. Never speculate or assume.
 - **Non-Destructive**: Never perform irreversible actions (file deletions, hard resets, remote push, Git LFS asset removal) without explicit user approval.
@@ -41,7 +41,7 @@ When asked to check status, assess the situation, or understand workspace contex
 1. **Local Git State**: Inspect working tree (`git status -s -b`) and recent commits (`git log -n 5 --oneline`).
 1. **GitHub PRs (always display)**: List **all** open PRs (`gh pr list`) and check the current branch's PR (`gh pr status`). Never skip this step, even when the local state is clean.
 1. **GitHub Issues (always display)**: List **all** open issues (`gh issue list`). Never skip this step.
-1. **Environment Health**: Verify build and test status (`nix fmt -- --fail-on-change`, `zig build`, `zig build test`).
+1. **Environment Health**: Verify build and test status (`treefmt --fail-on-change`, `zig build`, `zig build test`).
 1. **Synthesis**: Report a concise, structured status covering local state, remote GitHub state, and environment health. The report **must** include the open PR and Issue lists (number, title, and state), or explicitly state that there are none.
 
 ______________________________________________________________________
