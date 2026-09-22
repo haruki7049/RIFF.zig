@@ -26,7 +26,12 @@
       ];
 
       perSystem =
-        { pkgs, lib, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         let
           riff_zig = pkgs.stdenv.mkDerivation {
             name = "RIFF.zig";
@@ -74,6 +79,10 @@
               # LSP
               pkgs.nil
               pkgs.zls_0_16
+            ];
+
+            inputsFrom = [
+              config.treefmt.build.devShell
             ];
           };
         };
