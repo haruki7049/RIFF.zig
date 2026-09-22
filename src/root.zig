@@ -423,20 +423,16 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) 
     while (pos < bytes.len) {
         // Need at least 8 bytes for chunk header (FourCC + size)
         if (pos + 8 > bytes.len) {
-            // If we have leftover bytes that can't form a valid chunk header,
-            // this is not necessarily an error - it could be padding
-            // But we should check if there are any non-zero bytes
-            var has_data = false;
-            for (bytes[pos..]) |b| {
-                if (b != 0) {
-                    has_data = true;
-                    break;
-                }
+            // The RIFF spec only pads a chunk with a single zero byte, to
+            // keep the container's overall size even, after an odd-length
+            // chunk (write() emits exactly one such byte). Anything else
+            // here - more than one leftover byte, or a non-zero byte - is
+            // not standard padding and likely indicates truncated/corrupted
+            // data, so it must not be silently accepted.
+            if (bytes.len - pos == 1 and bytes[pos] == 0) {
+                break;
             }
-            if (has_data) {
-                return error.InvalidFormat;
-            }
-            break;
+            return error.InvalidFormat;
         }
 
         const id = bytes[pos .. pos + 4][0..4];
@@ -782,6 +778,41 @@ test "to_chunk_list does not leak a chunk's data if appending it to the list fai
         if (read(allocator, &reader)) |chunk| {
             chunk.deinit(allocator);
         } else |_| {}
+    }
+}
+
+test "read accepts exactly one trailing zero pad byte inside a container but rejects more" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: to_chunk_list() used to tolerate up to 7 trailing zero
+    // bytes after the last chunk in a container as "padding", with no basis
+    // in the RIFF spec (only a single pad byte, to keep the overall size
+    // even, is ever standard). That could mask truncated/corrupted data as
+    // valid. A single trailing zero byte must still be accepted; anything
+    // beyond that must be rejected as InvalidFormat.
+    const child = "data" ++ "\x02\x00\x00\x00" ++ "AB"; // even-sized, no pad needed
+
+    {
+        // Exactly one trailing zero byte: accepted.
+        const children = child ++ "\x00";
+        const buffer = "RIFF" ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
+        var reader = std.Io.Reader.fixed(buffer);
+        const parsed = try read(allocator, &reader);
+        defer parsed.deinit(allocator);
+    }
+    {
+        // Two trailing zero bytes: rejected.
+        const children = child ++ "\x00\x00";
+        const buffer = "RIFF" ++ "\x10\x00\x00\x00" ++ "TEST" ++ children;
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+    }
+    {
+        // One trailing non-zero byte: rejected.
+        const children = child ++ "\x01";
+        const buffer = "RIFF" ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
     }
 }
 
