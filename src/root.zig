@@ -466,7 +466,14 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) 
 
         const id = bytes[pos .. pos + 4][0..4];
         const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
-        const next_pos = pos + 8 + size;
+
+        // Detect overflow explicitly rather than just widening to usize:
+        // on a 32-bit target `usize` is `u32`, so there is no wider type to
+        // widen into, and `pos + 8 + size` can still overflow-panic for a
+        // `size` near `maxInt(u32)`. std.math.add reports the overflow as
+        // an error instead of panicking, on every target.
+        const header_end = std.math.add(usize, pos, 8) catch return error.SizeMismatch;
+        const next_pos = std.math.add(usize, header_end, size) catch return error.SizeMismatch;
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
