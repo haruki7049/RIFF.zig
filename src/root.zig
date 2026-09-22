@@ -165,6 +165,17 @@ pub const ToChunkListError = error{
     SizeMismatch,
 };
 
+/// Error type returned by `read()`.
+pub const ReadError = ToChunkListError || std.mem.Allocator.Error || FourCC.NewError;
+
+/// Error type returned by `write()`.
+pub const WriteError = std.Io.Writer.Error || error{
+    /// A `.chunk`'s data length, or a `.list`/`.riff` chunk's serialized
+    /// sub-chunk payload length, does not fit in a `u32` (RIFF size fields
+    /// are 32-bit).
+    PayloadTooLarge,
+};
+
 /// Serializes a RIFF chunk to its binary representation and writes it to a writer.
 ///
 /// This function converts a `Chunk` structure into the binary RIFF format according to the specification.
@@ -197,16 +208,17 @@ pub const ToChunkListError = error{
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
 ///   - `allocator`: Memory allocator used for temporary buffers during serialization of LIST and RIFF chunks.
 ///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.Io.Writer`).
+///     Must conform to `std.Io.Writer`'s error contract (`std.Io.Writer.Error`).
 ///
 /// Returns: `void` on success.
 ///
-/// Errors:
-///   - Any error from the writer (e.g., `WriteError`, disk full, connection errors).
-///   - `OutOfMemory`: If temporary buffer allocation fails for LIST or RIFF chunks.
+/// Errors: see `WriteError`.
+///   - `std.Io.Writer.Error.WriteFailed`: If the writer fails (disk full, connection errors, or
+///     temporary buffer allocation failure for LIST/RIFF chunks, surfaced through the writer).
 ///   - `PayloadTooLarge`: If a `.chunk`'s data length, or a `.list`/`.riff` chunk's
 ///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
 ///     fields are 32-bit).
-pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerror!void {
+pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) WriteError!void {
     switch (chunk) {
         .chunk => |b| {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
@@ -315,9 +327,11 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 ///
 /// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
-/// Errors:
-///   - Any error from the reader.
-pub fn read(allocator: std.mem.Allocator, reader: anytype) anyerror!Chunk {
+/// Errors: see `ReadError`.
+///   - `InvalidFormat`: If a chunk header is incomplete or malformed.
+///   - `SizeMismatch`: If a chunk's declared size extends beyond the available buffered data.
+///   - `OutOfMemory`: If allocating a chunk's data payload or a sub-chunk array fails.
+pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
     // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
     const four_cc_len = 4;
     const header_len = four_cc_len + @sizeOf(u32);
