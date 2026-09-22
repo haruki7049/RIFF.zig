@@ -28,8 +28,8 @@
       perSystem =
         {
           config,
-          pkgs,
           lib,
+          pkgs,
           ...
         }:
         let
