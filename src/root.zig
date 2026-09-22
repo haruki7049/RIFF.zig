@@ -145,6 +145,14 @@ pub const Chunk = union(enum) {
     /// For `.list` variants: Recursively frees all child chunks, then the chunks array.
     /// For `.riff` variants: Recursively frees all child chunks, then the chunks array.
     ///
+    /// `deinit()` recurses once per `.list`/`.riff` nesting level with no
+    /// depth limit of its own (unlike `read()`/`write()`, which are both
+    /// bounded by `max_nesting_depth`), since bailing out partway through
+    /// would leak whatever it hadn't freed yet. A `Chunk` returned by
+    /// `read()` is already within `max_nesting_depth`, so this only matters
+    /// for a tree built some other way: keep any such tree within
+    /// `max_nesting_depth` to avoid a stack overflow here.
+    ///
     /// Parameters:
     ///   - `allocator`: The same allocator that was used to create this chunk.
     pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
@@ -163,10 +171,13 @@ pub const Chunk = union(enum) {
 };
 
 /// Maximum nesting depth of RIFF/LIST containers that `read()`/`to_chunk_list`
-/// will descend into. Guards against a stack-overflow denial-of-service from
-/// adversarial input with many trivially nested LIST chunks (each level costs
-/// only 12 bytes: "LIST" + size + type FourCC), which would otherwise recurse
-/// without bound.
+/// will descend into, and that `write()` will serialize. Guards against a
+/// stack-overflow crash from adversarial input with many trivially nested
+/// LIST chunks (each level costs only 12 bytes: "LIST" + size + type
+/// FourCC) on the read side, and from a `Chunk` tree built some other way
+/// (not from `read()`, which is already bounded) on the write side -
+/// neither would otherwise recurse without bound. See also `Chunk.deinit()`,
+/// which has no enforced bound of its own.
 pub const max_nesting_depth: usize = 64;
 
 /// Error types that can occur during RIFF chunk parsing.
@@ -190,6 +201,11 @@ pub const WriteError = std.Io.Writer.Error || error{
     /// sub-chunk payload length, does not fit in a `u32` (RIFF size fields
     /// are 32-bit).
     PayloadTooLarge,
+    /// `.list`/`.riff` nesting in `chunk` exceeded `max_nesting_depth`. Guards
+    /// against a stack-overflow crash from a deeply nested `Chunk` tree that
+    /// did not come from `read()` (which is already bounded by the same
+    /// limit) - e.g. one built programmatically.
+    NestingTooDeep,
 };
 
 /// Serializes a RIFF chunk to its binary representation and writes it to a writer.
@@ -237,7 +253,21 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///   - `PayloadTooLarge`: If a `.chunk`'s data length, or any `.list`/`.riff` chunk's
 ///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
 ///     fields are 32-bit).
+///   - `NestingTooDeep`: If `.list`/`.riff` nesting in `chunk` exceeds `max_nesting_depth`.
 pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) WriteError!void {
+    return writeChunk(chunk, allocator, writer, 0);
+}
+
+/// `write()`'s actual implementation, with the nesting-depth counter that
+/// `write()`'s public signature has no room for. Bounded by
+/// `max_nesting_depth` the same way `to_chunk_list()` bounds `read()`: a
+/// `Chunk` tree passed to `write()` isn't required to have come from
+/// `read()`, so nothing else stops a deeply nested tree built some other way
+/// from overflowing the stack here.
+fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
+    if (depth > max_nesting_depth)
+        return error.NestingTooDeep;
+
     switch (chunk) {
         .chunk => |b| {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
@@ -252,12 +282,12 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
             }
         },
         .list => |l| {
-            const size = try container_children_size(l.chunks);
+            const size = try container_children_size(l.chunks, depth + 1);
 
             try writer.writeAll("LIST");
             try writer.writeInt(u32, size, .little);
             try writer.writeAll(&l.four_cc.inner);
-            for (l.chunks) |child| try write(child, allocator, writer);
+            for (l.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
 
             // Add padding byte if total data size is odd
             if (size % 2 == 1) {
@@ -265,12 +295,12 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
             }
         },
         .riff => |r| {
-            const size = try container_children_size(r.chunks);
+            const size = try container_children_size(r.chunks, depth + 1);
 
             try writer.writeAll("RIFF");
             try writer.writeInt(u32, size, .little);
             try writer.writeAll(&r.four_cc.inner);
-            for (r.chunks) |child| try write(child, allocator, writer);
+            for (r.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
 
             // Add padding byte if total data size is odd
             if (size % 2 == 1) {
@@ -296,25 +326,35 @@ fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
 /// anything. Used to determine a `.list`/`.riff` container's `size` field
 /// before its header is written, so `write()` can stream children directly
 /// to the real writer instead of buffering them first.
-fn serialized_size(chunk: Chunk) error{PayloadTooLarge}!usize {
+///
+/// `depth` is `chunk`'s own nesting level, bounded by `max_nesting_depth`
+/// the same way `to_chunk_list()` bounds `read()` - this is mutually
+/// recursive with `container_children_size()`, so without a bound a deeply
+/// nested `Chunk` tree could overflow the stack here just as it could in
+/// `writeChunk()`.
+fn serialized_size(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!usize {
+    if (depth > max_nesting_depth)
+        return error.NestingTooDeep;
+
     return switch (chunk) {
         .chunk => |b| blk: {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
             break :blk try chunkTotalSize(data_size);
         },
-        .list => |l| try chunkTotalSize(try container_children_size(l.chunks)),
-        .riff => |r| try chunkTotalSize(try container_children_size(r.chunks)),
+        .list => |l| try chunkTotalSize(try container_children_size(l.chunks, depth + 1)),
+        .riff => |r| try chunkTotalSize(try container_children_size(r.chunks, depth + 1)),
     };
 }
 
 /// Sums `serialized_size` over `chunks` plus the 4-byte type FourCC that
 /// precedes them inside a `.list`/`.riff` container, and checks the result
 /// fits the u32 RIFF size field - this is exactly the value `write()` puts
-/// in that container's own `size` field.
-fn container_children_size(chunks: []const Chunk) error{PayloadTooLarge}!u32 {
+/// in that container's own `size` field. `depth` is the nesting level of
+/// `chunks` themselves (one deeper than their `.list`/`.riff` parent).
+fn container_children_size(chunks: []const Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!u32 {
     var total: usize = 4; // type FourCC
     for (chunks) |child| {
-        const child_size = try serialized_size(child);
+        const child_size = try serialized_size(child, depth);
         total = std.math.add(usize, total, child_size) catch return error.PayloadTooLarge;
     }
     return std.math.cast(u32, total) orelse error.PayloadTooLarge;
@@ -588,6 +628,36 @@ test "write returns PayloadTooLarge for children whose sizes fit individually bu
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
     try std.testing.expectError(error.PayloadTooLarge, write(list_chunk, allocator, &w.writer));
+}
+
+test "write returns NestingTooDeep instead of overflowing the stack for excessively nested chunks" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: write()/serialized_size()/container_children_size()
+    // used to recurse once per nested .list/.riff level with no depth
+    // limit, unlike read()/to_chunk_list(). Nothing requires a Chunk tree
+    // passed to write() to have come from read() (which is already
+    // bounded), so a tree built some other way - e.g. programmatically, as
+    // here - could overflow the stack. Build a chain nested one level
+    // deeper than max_nesting_depth iteratively (so the *construction*
+    // itself doesn't recurse) and confirm write() reports NestingTooDeep
+    // instead of crashing.
+    var children: []Chunk = try allocator.alloc(Chunk, 1);
+    children[0] = .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "" } };
+
+    var depth: usize = 0;
+    while (depth <= max_nesting_depth) : (depth += 1) {
+        const wrapped = try allocator.alloc(Chunk, 1);
+        wrapped[0] = .{ .list = .{ .four_cc = try FourCC.new("TYPE"), .chunks = children } };
+        children = wrapped;
+    }
+
+    const chunk = Chunk{ .list = .{ .four_cc = try FourCC.new("TEST"), .chunks = children } };
+    defer chunk.deinit(allocator);
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try std.testing.expectError(error.NestingTooDeep, write(chunk, allocator, &w.writer));
 }
 
 test "write performs no allocation for nested .list/.riff containers" {
