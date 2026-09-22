@@ -271,6 +271,20 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 /// - **Basic chunks**: Leaf chunks with a FourCC identifier and data payload.
 ///   The function expects at least 8 bytes: FourCC (4) + size (4), followed by data.
 ///
+/// ## Buffering Requirement
+///
+/// `read()` only inspects whatever bytes are already available via `reader.buffered()`;
+/// it never calls `fill`/`discard` or otherwise pulls more bytes from the underlying
+/// source. This means `reader` must already have the *entire* chunk (including all
+/// nested sub-chunks) sitting in its buffer before calling `read()`. A genuinely
+/// streaming reader whose buffer is smaller than the data being parsed will fail with
+/// `error.InvalidFormat` or `error.SizeMismatch` on otherwise valid RIFF data.
+///
+/// In practice this means reading the whole input into memory first and wrapping it
+/// with `std.Io.Reader.fixed(data)`, as shown in the module-level usage example, rather
+/// than passing a small-buffer streaming reader (e.g. a file reader with a small
+/// internal buffer) directly.
+///
 /// ## Memory Allocation
 ///
 /// The function allocates memory for:
@@ -288,7 +302,9 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
-///   - `reader`: The reader interface to read RIFF chunk binary data from (must have a `buffered()` method).
+///   - `reader`: The reader interface to read RIFF chunk binary data from (must have a
+///     `buffered()` method). Its buffer must already contain the entire chunk being
+///     parsed; see "Buffering Requirement" below.
 ///
 /// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
