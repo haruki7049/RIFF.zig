@@ -590,6 +590,46 @@ test "riff_chunk trailing bytes after the declared size are not absorbed as sub-
     try std.testing.expectEqualDeep(riff_chunk, parsed);
 }
 
+test "read returns InvalidFormat for a buffer shorter than a chunk header" {
+    const allocator = std.testing.allocator;
+
+    const buffer = "abc"; // 3 bytes, less than the 8-byte header (FourCC + size)
+    var reader = std.Io.Reader.fixed(buffer);
+    try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+}
+
+test "read returns InvalidFormat for a RIFF/LIST header without room for the type FourCC" {
+    const allocator = std.testing.allocator;
+
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        // 8 bytes: id + size, but no room left for the 4-byte type FourCC.
+        const buffer = id ++ "\x04\x00\x00\x00";
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+    }
+}
+
+test "read returns SizeMismatch when the declared size exceeds the remaining buffer" {
+    const allocator = std.testing.allocator;
+
+    // "data" chunk declares 10 bytes of payload, but only 2 bytes follow.
+    const buffer = "data" ++ "\x0a\x00\x00\x00" ++ "AB";
+    var reader = std.Io.Reader.fixed(buffer);
+    try std.testing.expectError(error.SizeMismatch, read(allocator, &reader));
+}
+
+test "read returns InvalidFormat for a nested LIST without room for its type FourCC" {
+    const allocator = std.testing.allocator;
+
+    // Nested LIST declares a 2-byte payload, leaving no room for its own
+    // 4-byte type FourCC.
+    const nested_list = "LIST" ++ "\x02\x00\x00\x00" ++ "XY";
+    const buffer = "RIFF" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ nested_list;
+
+    var reader = std.Io.Reader.fixed(buffer);
+    try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+}
+
 test "FluidR3_GM2-2.sf2 serialization" {
     const allocator = std.testing.allocator;
     const assertion_data = struct {
