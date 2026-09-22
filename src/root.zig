@@ -350,7 +350,10 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
         if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
 
-        const data_end = header_len + size;
+        // Widen to usize before adding: `header_len` is a comptime_int with no
+        // usize operand in this expression, so `header_len + size` would stay
+        // u32-typed and overflow-panic for `size` near `maxInt(u32)`.
+        const data_end: usize = header_len + @as(usize, size);
         if (buffer.len < data_end)
             return error.SizeMismatch;
 
@@ -361,7 +364,7 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
         if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
 
-        const data_end = header_len + size;
+        const data_end: usize = header_len + @as(usize, size);
         if (buffer.len < data_end)
             return error.SizeMismatch;
 
@@ -369,7 +372,7 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
         const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end]);
         return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else {
-        const data_end = header_len + size;
+        const data_end: usize = header_len + @as(usize, size);
 
         if (buffer.len < data_end)
             return error.SizeMismatch;
@@ -630,6 +633,28 @@ test "read returns SizeMismatch when the declared size exceeds the remaining buf
     const buffer = "data" ++ "\x0a\x00\x00\x00" ++ "AB";
     var reader = std.Io.Reader.fixed(buffer);
     try std.testing.expectError(error.SizeMismatch, read(allocator, &reader));
+}
+
+test "read returns SizeMismatch instead of panicking for a near-max declared size" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: `header_len + size` has no usize operand of its own, so
+    // it used to stay u32-typed and overflow-panic once `size` got within 7 of
+    // `maxInt(u32)`, instead of read() reporting SizeMismatch like it does for
+    // any other too-large declared size.
+    const buffer = "data" ++ "\xff\xff\xff\xff" ++ "AB";
+    var reader = std.Io.Reader.fixed(buffer);
+    try std.testing.expectError(error.SizeMismatch, read(allocator, &reader));
+}
+
+test "read returns SizeMismatch instead of panicking for a near-max RIFF/LIST declared size" {
+    const allocator = std.testing.allocator;
+
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        const buffer = id ++ "\xff\xff\xff\xff" ++ "TEST";
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.SizeMismatch, read(allocator, &reader));
+    }
 }
 
 test "read returns InvalidFormat for a nested LIST without room for its type FourCC" {
