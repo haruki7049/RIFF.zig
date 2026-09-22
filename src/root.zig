@@ -155,6 +155,13 @@ pub const Chunk = union(enum) {
     }
 };
 
+/// Maximum nesting depth of RIFF/LIST containers that `read()`/`to_chunk_list`
+/// will descend into. Guards against a stack-overflow denial-of-service from
+/// adversarial input with many trivially nested LIST chunks (each level costs
+/// only 12 bytes: "LIST" + size + type FourCC), which would otherwise recurse
+/// without bound.
+pub const max_nesting_depth: usize = 64;
+
 /// Error types that can occur during RIFF chunk parsing.
 pub const ToChunkListError = error{
     /// The input data does not conform to the expected RIFF format structure.
@@ -163,6 +170,8 @@ pub const ToChunkListError = error{
     /// The actual data size does not match the size specified in the chunk header.
     /// This typically indicates corrupted or truncated RIFF data.
     SizeMismatch,
+    /// RIFF/LIST container nesting exceeded `max_nesting_depth`.
+    NestingTooDeep,
 };
 
 /// Error type returned by `read()`.
@@ -330,6 +339,7 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) WriteE
 /// Errors: see `ReadError`.
 ///   - `InvalidFormat`: If a chunk header is incomplete or malformed.
 ///   - `SizeMismatch`: If a chunk's declared size extends beyond the available buffered data.
+///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
 ///   - `OutOfMemory`: If allocating a chunk's data payload or a sub-chunk array fails.
 pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
     // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
@@ -358,7 +368,7 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
             return error.SizeMismatch;
 
         const four_cc = buffer[header_len..container_header_len];
-        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end]);
+        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end], 0);
         return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else if (std.mem.eql(u8, id, "LIST")) {
         if (buffer.len < container_header_len or size < four_cc_len)
@@ -369,7 +379,7 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
             return error.SizeMismatch;
 
         const four_cc = buffer[header_len..container_header_len];
-        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end]);
+        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end], 0);
         return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else {
         const data_end: usize = header_len + @as(usize, size);
@@ -388,14 +398,21 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating chunk structures.
 ///   - `bytes`: The raw binary data containing one or more sequential chunks.
+///   - `depth`: Current nesting depth (0 for the children of the top-level
+///     RIFF/LIST chunk `read()` parsed). Checked against `max_nesting_depth`
+///     before descending into a nested LIST chunk, to bound recursion.
 ///
 /// Returns: A slice of parsed `Chunk` instances.
 ///
 /// Errors:
 ///   - `InvalidFormat`: If any chunk header is incomplete (from `ToChunkListError` or `FourCC.NewError`).
 ///   - `SizeMismatch`: If any chunk size extends beyond available data (from `ToChunkListError`).
+///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
 ///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
+fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
+    if (depth > max_nesting_depth)
+        return error.NestingTooDeep;
+
     var list: std.array_list.Aligned(Chunk, null) = .empty;
     errdefer {
         for (list.items) |c| c.deinit(allocator);
@@ -431,7 +448,7 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
         if (std.mem.eql(u8, id, "LIST")) {
             if (next_pos < pos + 12) return error.InvalidFormat;
             const list_type = bytes[pos + 8 .. pos + 12][0..4];
-            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 12 .. next_pos]);
+            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 12 .. next_pos], depth + 1);
             errdefer {
                 for (sub_chunks) |c| c.deinit(allocator);
                 allocator.free(sub_chunks);
@@ -667,6 +684,44 @@ test "read returns InvalidFormat for a nested LIST without room for its type Fou
 
     var reader = std.Io.Reader.fixed(buffer);
     try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+}
+
+test "read returns NestingTooDeep instead of overflowing the stack for excessively nested LIST chunks" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: to_chunk_list() used to recurse once per nested LIST
+    // chunk with no depth limit, so adversarial input with many trivially
+    // nested LIST chunks (12 bytes of overhead each) could overflow the call
+    // stack before any error was returned. Build a chain nested one level
+    // deeper than max_nesting_depth and confirm read() reports
+    // NestingTooDeep instead of crashing.
+
+    // Innermost leaf: a plain chunk with no payload.
+    var prev = try allocator.dupe(u8, "DATA" ++ "\x00\x00\x00\x00");
+    defer allocator.free(prev);
+
+    var depth: usize = 0;
+    while (depth <= max_nesting_depth) : (depth += 1) {
+        const size: u32 = @intCast(4 + prev.len); // type FourCC (4) + children (prev)
+        const wrapped = try allocator.alloc(u8, 12 + prev.len);
+        @memcpy(wrapped[0..4], "LIST");
+        std.mem.writeInt(u32, wrapped[4..8], size, .little);
+        @memcpy(wrapped[8..12], "TYPE");
+        @memcpy(wrapped[12..], prev);
+        allocator.free(prev);
+        prev = wrapped;
+    }
+
+    const riff_size: u32 = @intCast(4 + prev.len);
+    const buffer = try allocator.alloc(u8, 12 + prev.len);
+    defer allocator.free(buffer);
+    @memcpy(buffer[0..4], "RIFF");
+    std.mem.writeInt(u32, buffer[4..8], riff_size, .little);
+    @memcpy(buffer[8..12], "TEST");
+    @memcpy(buffer[12..], prev);
+
+    var reader = std.Io.Reader.fixed(buffer);
+    try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
 }
 
 test "FluidR3_GM2-2.sf2 serialization" {
