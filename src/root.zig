@@ -21,32 +21,39 @@
 //! const std = @import("std");
 //! const riff = @import("riff_zig");
 //!
-//! var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-//! defer _ = gpa.deinit();
-//! const allocator = gpa.allocator();
+//! pub fn main(init: std.process.Init) !void {
+//!     const allocator = init.gpa;
+//!     const io = init.io;
 //!
-//! // Create a WAVE file structure
-//! const format_data = "..."; // Your format chunk data
-//! const audio_data = "...";  // Your audio sample data
-//! const wave_chunk = riff.Chunk{ .riff = .{
-//!     .four_cc = riff.FourCC.new("WAVE"),
-//!     .chunks = &[_]riff.Chunk{
-//!         .{ .chunk = .{ .four_cc = riff.FourCC.new("fmt "), .data = format_data } },
-//!         .{ .chunk = .{ .four_cc = riff.FourCC.new("data"), .data = audio_data } },
-//!     },
-//! }};
+//!     // Create a WAVE file structure
+//!     const format_data = "..."; // Your format chunk data
+//!     const audio_data = "...";  // Your audio sample data
+//!     const wave_chunk = riff.Chunk{ .riff = .{
+//!         .four_cc = try riff.FourCC.new("WAVE"),
+//!         .chunks = &[_]riff.Chunk{
+//!             .{ .chunk = .{ .four_cc = try riff.FourCC.new("fmt "), .data = format_data } },
+//!             .{ .chunk = .{ .four_cc = try riff.FourCC.new("data"), .data = audio_data } },
+//!         },
+//!     } };
 //!
-//! // Serialize to file
-//! const file = try std.fs.cwd().createFile("output.wav", .{});
-//! defer file.close();
-//! try riff.write(wave_chunk, allocator, file.writer());
+//!     // Serialize to file. write() takes a *std.Io.Writer, so wrap the file
+//!     // in a buffered File.Writer and pass its `.interface`, then flush.
+//!     const out_file = try std.Io.Dir.cwd().createFile(io, "output.wav", .{});
+//!     defer out_file.close(io);
+//!     var out_buffer: [4096]u8 = undefined;
+//!     var file_writer = out_file.writer(io, &out_buffer);
+//!     try riff.write(wave_chunk, allocator, &file_writer.interface);
+//!     try file_writer.interface.flush();
 //!
-//! // Parse from file
-//! const data = try std.fs.cwd().readFileAlloc(allocator, "input.wav", 1024 * 1024);
-//! defer allocator.free(data);
-//! var reader = std.Io.Reader.fixed(data);
-//! const parsed = try riff.read(allocator, &reader);
-//! defer parsed.deinit(allocator);
+//!     // Parse from file. read() only inspects reader.buffered() (see
+//!     // "Buffering Requirement" on `read`), so load the whole file up
+//!     // front and wrap it with a fixed reader rather than streaming it.
+//!     const data = try std.Io.Dir.cwd().readFileAlloc(io, "input.wav", allocator, .unlimited);
+//!     defer allocator.free(data);
+//!     var reader = std.Io.Reader.fixed(data);
+//!     const parsed = try riff.read(allocator, &reader);
+//!     defer parsed.deinit(allocator);
+//! }
 //! ```
 //!
 //! ## API Functions
