@@ -203,11 +203,16 @@ pub const ToChunkListError = error{
 /// Errors:
 ///   - Any error from the writer (e.g., `WriteError`, disk full, connection errors).
 ///   - `OutOfMemory`: If temporary buffer allocation fails for LIST or RIFF chunks.
+///   - `PayloadTooLarge`: If a `.chunk`'s data length, or a `.list`/`.riff` chunk's
+///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
+///     fields are 32-bit).
 pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerror!void {
     switch (chunk) {
         .chunk => |b| {
+            const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
+
             try writer.writeAll(&b.four_cc.inner);
-            try writer.writeInt(u32, @intCast(b.data.len), .little);
+            try writer.writeInt(u32, data_size, .little);
             try writer.writeAll(b.data);
 
             // Add padding byte if data size is odd
@@ -222,9 +227,10 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 
             const written_bytes = w.written();
             const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
+            const size = std.math.cast(u32, total_data_size) orelse return error.PayloadTooLarge;
 
             try writer.writeAll("LIST");
-            try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
+            try writer.writeInt(u32, size, .little);
             try writer.writeAll(&l.four_cc.inner);
             try writer.writeAll(written_bytes);
 
@@ -240,9 +246,10 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 
             const written_bytes = w.written();
             const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
+            const size = std.math.cast(u32, total_data_size) orelse return error.PayloadTooLarge;
 
             try writer.writeAll("RIFF");
-            try writer.writeInt(u32, @intCast(written_bytes.len + 4), .little);
+            try writer.writeInt(u32, size, .little);
             try writer.writeAll(&r.four_cc.inner);
             try writer.writeAll(written_bytes);
 
@@ -446,6 +453,22 @@ test "chunk serialization" {
 
     const chunk_file: []const u8 = @embedFile("assets/riff-files/chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, chunk_data);
+}
+
+test "write returns PayloadTooLarge instead of panicking for oversized chunk data" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: build a slice whose length exceeds u32 max without
+    // actually allocating any memory for it. write() must reject this based
+    // on `.len` alone, before ever writing (or dereferencing) `data`, so
+    // constructing the slice from a dangling-but-unread pointer is safe here.
+    const fake_len: usize = @as(usize, std.math.maxInt(u32)) + 1;
+    const fake_data: []const u8 = @as([*]const u8, @ptrFromInt(1))[0..fake_len];
+    const chunk = Chunk{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = fake_data } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try std.testing.expectError(error.PayloadTooLarge, write(chunk, allocator, &w.writer));
 }
 
 test "list_chunk serialization" {
