@@ -393,7 +393,10 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8) (ToChunkListEr
             } });
         }
 
-        pos = next_pos;
+        // RIFF chunks are padded to an even byte boundary: `write()` emits a
+        // pad byte after odd-length data, but that pad byte is not counted in
+        // `size`, so it must be skipped here before parsing the next sibling.
+        pos = next_pos + (size % 2);
     }
 
     return list.toOwnedSlice(allocator);
@@ -450,6 +453,32 @@ test "list_chunk serialization" {
 
     const chunk_file: []const u8 = @embedFile("assets/riff-files/list_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, list_chunk_data);
+}
+
+test "list_chunk with an odd-sized chunk followed by a sibling chunk round-trips" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: "odd1" has an odd-length payload (1 byte), so write()
+    // appends a pad byte after it. read() must skip that pad byte before
+    // parsing the next sibling chunk header ("even"), instead of desyncing.
+    const list_chunk = Chunk{ .list = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("odd1"), .data = "A" } },
+            .{ .chunk = .{ .four_cc = try FourCC.new("even"), .data = "BB" } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(list_chunk, allocator, &w.writer);
+    const list_chunk_data: []u8 = w.written();
+
+    var reader = std.Io.Reader.fixed(list_chunk_data);
+    const parsed: Chunk = try read(allocator, &reader);
+    defer parsed.deinit(allocator);
+
+    try std.testing.expectEqualDeep(list_chunk, parsed);
 }
 
 test "riff_chunk serialization" {
