@@ -280,6 +280,17 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
     }
 }
 
+/// Computes `8 + payload_len` (chunk header) plus the trailing parity pad
+/// byte, detecting overflow explicitly rather than relying on `usize` being
+/// wider than `u32`: on a 32-bit target `usize` is `u32`, so there is no
+/// wider type to widen into and the addition could still overflow-panic for
+/// a `payload_len` near `maxInt(u32)`. Shared by every arm of
+/// `serialized_size` since the formula is identical for each.
+fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
+    const with_header = std.math.add(usize, 8, payload_len) catch return error.PayloadTooLarge;
+    return std.math.add(usize, with_header, payload_len % 2) catch error.PayloadTooLarge;
+}
+
 /// Computes the total serialized size (header + data/children + parity pad)
 /// that `write()` would produce for `chunk`, without allocating or writing
 /// anything. Used to determine a `.list`/`.riff` container's `size` field
@@ -289,16 +300,10 @@ fn serialized_size(chunk: Chunk) error{PayloadTooLarge}!usize {
     return switch (chunk) {
         .chunk => |b| blk: {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
-            break :blk 8 + @as(usize, data_size) + (data_size % 2);
+            break :blk try chunkTotalSize(data_size);
         },
-        .list => |l| blk: {
-            const children_size = try container_children_size(l.chunks);
-            break :blk 8 + @as(usize, children_size) + (children_size % 2);
-        },
-        .riff => |r| blk: {
-            const children_size = try container_children_size(r.chunks);
-            break :blk 8 + @as(usize, children_size) + (children_size % 2);
-        },
+        .list => |l| try chunkTotalSize(try container_children_size(l.chunks)),
+        .riff => |r| try chunkTotalSize(try container_children_size(r.chunks)),
     };
 }
 
@@ -308,7 +313,10 @@ fn serialized_size(chunk: Chunk) error{PayloadTooLarge}!usize {
 /// in that container's own `size` field.
 fn container_children_size(chunks: []const Chunk) error{PayloadTooLarge}!u32 {
     var total: usize = 4; // type FourCC
-    for (chunks) |child| total += try serialized_size(child);
+    for (chunks) |child| {
+        const child_size = try serialized_size(child);
+        total = std.math.add(usize, total, child_size) catch return error.PayloadTooLarge;
+    }
     return std.math.cast(u32, total) orelse error.PayloadTooLarge;
 }
 
