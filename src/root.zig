@@ -304,17 +304,26 @@ pub fn read(allocator: std.mem.Allocator, reader: anytype) anyerror!Chunk {
     const size = std.mem.readInt(u32, buffer[4..8], .little);
 
     if (std.mem.eql(u8, id, "RIFF")) {
-        if (buffer.len < 12)
+        if (buffer.len < 12 or size < 4)
             return error.InvalidFormat;
 
+        const data_end = 8 + size;
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
         const four_cc = buffer[8..12];
-        const chunks = try to_chunk_list(allocator, buffer[12..]);
+        const chunks = try to_chunk_list(allocator, buffer[12..data_end]);
         return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else if (std.mem.eql(u8, id, "LIST")) {
-        if (buffer.len < 12)
+        if (buffer.len < 12 or size < 4)
             return error.InvalidFormat;
+
+        const data_end = 8 + size;
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
         const four_cc = buffer[8..12];
-        const chunks = try to_chunk_list(allocator, buffer[12..]);
+        const chunks = try to_chunk_list(allocator, buffer[12..data_end]);
         return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else {
         const data_end = 8 + size;
@@ -502,6 +511,38 @@ test "riff_chunk serialization" {
 
     const chunk_file: []const u8 = @embedFile("assets/riff-files/riff_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
+}
+
+test "riff_chunk trailing bytes after the declared size are not absorbed as sub-chunks" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: a well-formed, complete top-level RIFF chunk followed by
+    // extra trailing bytes (e.g. concatenated files, trailer metadata) must not
+    // have those trailing bytes parsed as additional sub-chunks; read() must
+    // bound its parsing to the RIFF chunk's own declared `size`.
+    const riff_chunk = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "AB" } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(riff_chunk, allocator, &w.writer);
+    const riff_chunk_data = w.written();
+
+    const trailing = "JUNK" ++ "\x02\x00\x00\x00";
+    const buffer = try allocator.alloc(u8, riff_chunk_data.len + trailing.len);
+    defer allocator.free(buffer);
+    @memcpy(buffer[0..riff_chunk_data.len], riff_chunk_data);
+    @memcpy(buffer[riff_chunk_data.len..], trailing);
+
+    var reader = std.Io.Reader.fixed(buffer);
+    const parsed: Chunk = try read(allocator, &reader);
+    defer parsed.deinit(allocator);
+
+    try std.testing.expectEqualDeep(riff_chunk, parsed);
 }
 
 test "FluidR3_GM2-2.sf2 serialization" {
