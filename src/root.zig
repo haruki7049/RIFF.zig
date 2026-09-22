@@ -210,21 +210,24 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///
 /// ## Usage
 ///
-/// The function recursively serializes nested chunks. For `.list` and `.riff` variants,
-/// temporary buffers are used to calculate sizes before writing to the output writer.
+/// The function serializes nested chunks in two passes: first it computes
+/// each `.list`/`.riff` container's total serialized size with a pure,
+/// allocation-free walk of the tree (`container_children_size`), then it
+/// streams the header and children directly to `writer`. No intermediate
+/// buffer is built, so nested containers are not copied once per level.
 ///
 /// Parameters:
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
-///   - `allocator`: Memory allocator used for temporary buffers during serialization of LIST and RIFF chunks.
+///   - `allocator`: Unused by `write()` itself; kept for API stability. `write()` performs no
+///     allocation of its own.
 ///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.Io.Writer`).
 ///     Must conform to `std.Io.Writer`'s error contract (`std.Io.Writer.Error`).
 ///
 /// Returns: `void` on success.
 ///
 /// Errors: see `WriteError`.
-///   - `std.Io.Writer.Error.WriteFailed`: If the writer fails (disk full, connection errors, or
-///     temporary buffer allocation failure for LIST/RIFF chunks, surfaced through the writer).
-///   - `PayloadTooLarge`: If a `.chunk`'s data length, or a `.list`/`.riff` chunk's
+///   - `std.Io.Writer.Error.WriteFailed`: If the writer fails (disk full, connection errors, etc.).
+///   - `PayloadTooLarge`: If a `.chunk`'s data length, or any `.list`/`.riff` chunk's
 ///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
 ///     fields are 32-bit).
 pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) WriteError!void {
@@ -242,44 +245,64 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) WriteE
             }
         },
         .list => |l| {
-            var w = std.Io.Writer.Allocating.init(allocator);
-            defer w.deinit();
-            for (l.chunks) |child| try write(child, allocator, &w.writer);
-
-            const written_bytes = w.written();
-            const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
-            const size = std.math.cast(u32, total_data_size) orelse return error.PayloadTooLarge;
+            const size = try container_children_size(l.chunks);
 
             try writer.writeAll("LIST");
             try writer.writeInt(u32, size, .little);
             try writer.writeAll(&l.four_cc.inner);
-            try writer.writeAll(written_bytes);
+            for (l.chunks) |child| try write(child, allocator, writer);
 
             // Add padding byte if total data size is odd
-            if (total_data_size % 2 == 1) {
+            if (size % 2 == 1) {
                 try writer.writeByte(0);
             }
         },
         .riff => |r| {
-            var w = std.Io.Writer.Allocating.init(allocator);
-            defer w.deinit();
-            for (r.chunks) |child| try write(child, allocator, &w.writer);
-
-            const written_bytes = w.written();
-            const total_data_size = 4 + written_bytes.len; // FourCC + sub-chunks
-            const size = std.math.cast(u32, total_data_size) orelse return error.PayloadTooLarge;
+            const size = try container_children_size(r.chunks);
 
             try writer.writeAll("RIFF");
             try writer.writeInt(u32, size, .little);
             try writer.writeAll(&r.four_cc.inner);
-            try writer.writeAll(written_bytes);
+            for (r.chunks) |child| try write(child, allocator, writer);
 
             // Add padding byte if total data size is odd
-            if (total_data_size % 2 == 1) {
+            if (size % 2 == 1) {
                 try writer.writeByte(0);
             }
         },
     }
+}
+
+/// Computes the total serialized size (header + data/children + parity pad)
+/// that `write()` would produce for `chunk`, without allocating or writing
+/// anything. Used to determine a `.list`/`.riff` container's `size` field
+/// before its header is written, so `write()` can stream children directly
+/// to the real writer instead of buffering them first.
+fn serialized_size(chunk: Chunk) error{PayloadTooLarge}!usize {
+    return switch (chunk) {
+        .chunk => |b| blk: {
+            const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
+            break :blk 8 + @as(usize, data_size) + (data_size % 2);
+        },
+        .list => |l| blk: {
+            const children_size = try container_children_size(l.chunks);
+            break :blk 8 + @as(usize, children_size) + (children_size % 2);
+        },
+        .riff => |r| blk: {
+            const children_size = try container_children_size(r.chunks);
+            break :blk 8 + @as(usize, children_size) + (children_size % 2);
+        },
+    };
+}
+
+/// Sums `serialized_size` over `chunks` plus the 4-byte type FourCC that
+/// precedes them inside a `.list`/`.riff` container, and checks the result
+/// fits the u32 RIFF size field - this is exactly the value `write()` puts
+/// in that container's own `size` field.
+fn container_children_size(chunks: []const Chunk) error{PayloadTooLarge}!u32 {
+    var total: usize = 4; // type FourCC
+    for (chunks) |child| total += try serialized_size(child);
+    return std.math.cast(u32, total) orelse error.PayloadTooLarge;
 }
 
 /// Parses a RIFF chunk from a reader containing binary RIFF data.
@@ -521,6 +544,40 @@ test "write returns PayloadTooLarge instead of panicking for oversized chunk dat
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
     try std.testing.expectError(error.PayloadTooLarge, write(chunk, allocator, &w.writer));
+}
+
+test "write performs no allocation for nested .list/.riff containers" {
+    // Regression test: write()'s .list/.riff branches used to build each
+    // nesting level's serialized children in a temporary
+    // std.Io.Writer.Allocating buffer before copying it into the parent -
+    // meaning every level needed at least one allocation, and the same bytes
+    // were copied again at each level on the way up. write() now computes
+    // container sizes with a pure, allocation-free helper and streams
+    // children directly to the real writer, so it should need no allocation
+    // at all. Pass an allocator that fails on the very first allocation
+    // attempt, and a non-allocating fixed-buffer writer, so any allocation
+    // anywhere in write() (its own, or the destination writer's) fails loudly.
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const allocator = failing.allocator();
+
+    const nested = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .list = .{
+                .four_cc = try FourCC.new("SUB1"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "hi" } },
+                },
+            } },
+        },
+    } };
+
+    var buffer: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buffer);
+    try write(nested, allocator, &w);
+
+    const expected = "RIFF" ++ "\x1a\x00\x00\x00" ++ "TEST" ++ "LIST" ++ "\x0e\x00\x00\x00" ++ "SUB1" ++ "data" ++ "\x02\x00\x00\x00" ++ "hi";
+    try std.testing.expectEqualSlices(u8, expected, w.buffered());
 }
 
 test "list_chunk serialization" {
