@@ -1,9 +1,9 @@
----
-name: fresh-eyes-audit
-description: Launch several independent, context-free code-review agents in parallel to audit the current repository for bugs, edge cases, and gaps that existing tracked issues don't cover. Use when the user asks for a "fresh eyes" sweep, wants to double-check nothing was missed after closing a batch of issues, or asks to repeat a blank-slate repo check N times.
----
-
 # Fresh-Eyes Audit
+
+Launch several independent, context-free code-review agents in parallel to audit the current
+repository for bugs, edge cases, and gaps that existing tracked issues don't cover. Use this
+procedure when asked for a "fresh eyes" sweep, to double-check nothing was missed after closing a
+batch of issues, or to repeat a blank-slate repo check N times.
 
 Repeatedly re-reading a codebase with full memory of what you already fixed causes anchoring: you
 stop noticing problems adjacent to (or independent of) the ones you already know about. This skill
@@ -31,7 +31,7 @@ the repo from a blank slate, then reconciling their findings.
    the exact repo path and issue tracker to check. Do not read the source yourself first — this
    skill's value comes from the *subagents'* blank-slate read, not yours combined with theirs.
 
-2. **Launch N parallel, fresh subagents in a single message.** Use the Agent tool with
+1. **Launch N parallel, fresh subagents in a single message.** Use the Agent tool with
    `subagent_type: "general-purpose"` (never `"fork"` — a fork inherits your context, which defeats
    the point) once per pass, all in one message so they run concurrently. Give every agent the same
    self-contained prompt — they must not see each other's results or your prior findings:
@@ -41,16 +41,16 @@ the repo from a blank slate, then reconciling their findings.
    >
    > 1. Explore the repo structure and read the source relevant to its core logic (skip generated/
    >    vendored files).
-   > 2. Identify and run its build/test command (check for `build.zig`, `package.json`, `Cargo.toml`,
+   > 1. Identify and run its build/test command (check for `build.zig`, `package.json`, `Cargo.toml`,
    >    `go.mod`, `Makefile`, etc.) to confirm the current state and note pass/fail counts.
-   > 3. Run `gh issue list --state all --limit 50 --json number,title,state` and
+   > 1. Run `gh issue list --state all --limit 50 --json number,title,state` and
    >    `gh pr list --state all --limit 50 --json number,title,state,headRefName` so you don't
    >    re-report something already tracked or already fixed via a merged PR.
-   > 4. Independently look for real problems: incorrect bounds/overflow handling, unhandled error
+   > 1. Independently look for real problems: incorrect bounds/overflow handling, unhandled error
    >    paths, missing validation, resource/memory leaks, unbounded recursion, race conditions,
    >    inconsistent behavior between mirrored code paths (e.g. read vs. write, encode vs. decode),
    >    missing test coverage for edge cases, and documentation that doesn't match behavior.
-   > 5. For each finding not already covered by an existing issue/PR, give a concrete file:line
+   > 1. For each finding not already covered by an existing issue/PR, give a concrete file:line
    >    reference and a specific, reproducible failure scenario (what input/state triggers it). If
    >    you can cheaply verify it (e.g. a throwaway test run and removed, repo left clean), do so and
    >    say so.
@@ -58,7 +58,8 @@ the repo from a blank slate, then reconciling their findings.
    > Do NOT create issues or modify code — read-only research. Report findings in under 400 words,
    > or state plainly that you found nothing new.
 
-3. **Wait for all N to report**, then reconcile in your own context:
+1. **Wait for all N to report**, then reconcile in your own context:
+
    - Group findings that multiple passes independently surfaced — agreement across independent,
      zero-context runs is a strong confidence signal, much stronger than one pass's opinion.
    - Drop anything that turns out to already be covered by a tracked issue/PR (verify with `gh`
@@ -66,7 +67,7 @@ the repo from a blank slate, then reconciling their findings.
    - Discard anything that isn't a concrete, reproducible problem (style opinions, hypothetical
      concerns with no trigger, or things already fixed on `main`).
 
-4. **Report to the user**: a short deduped list of candidate issues, each with file:line, the
+1. **Report to the user**: a short deduped list of candidate issues, each with file:line, the
    failure scenario, and how many passes independently found it. Do not open GitHub issues, PRs, or
    write code changes from these findings yourself — ask the user whether to file issues / fix them,
    unless they've already said to do so in the same request.
