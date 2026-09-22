@@ -1,0 +1,60 @@
+# Agent Guidelines for `RIFF.zig`
+
+This document defines core principles, architectural invariants, and non-negotiable safety rules for AI agents working on the `RIFF.zig` repository.
+
+______________________________________________________________________
+
+## 1. Project Overview & Architecture
+
+`RIFF.zig` is a low-level RIFF (Resource Interchange File Format) container reader/writer library written in Zig. It has no external Zig package dependencies and is used as a foundation by higher-level projects, such as [`zigggwavvv`](https://github.com/haruki7049/zigggwavvv) (WAV).
+
+- **Development Environment**: Managed with Nix (`flake.nix`), `direnv`, and `treefmt-nix` (via `treefmt-nix`) for formatting Zig, Nix, GitHub Actions, and Markdown files. The `treefmt` binary is **not** on `PATH` inside `nix develop` for this repo; use the `nix fmt` flake app instead (see `.agents/skills/pr-workflow/SKILL.md`).
+- **Target Language Version**: Zig `0.16.0` (`minimum_zig_version` in `build.zig.zon`). This library has no external Zig package dependencies (`dependencies = {}`).
+- **Directory Structure**:
+  - `src/root.zig`: Library entry point (public API, chunk parsing/writing logic and tests).
+  - `src/assertion_data.zig`: Shared test assertion helpers.
+  - `src/assets/riff-files/`, `src/assets/chunk-data/`: Sample RIFF files and expected chunk-data fixtures used by tests. `.sf2` and `.bin` files are tracked via **Git LFS** (see `.gitattributes` / `.lfsconfig`).
+  - `build.zig` & `build.zig.zon`: Build definition and package metadata. Steps: `zig build` (static library), `zig build test`, `zig build docs`.
+  - `.github/workflows/`: CI (`ci.yml`, matrix build+test across OS), Nix checks (`nix-checker.yml`), API docs deployment to GitHub Pages (`deploy-api-docs.yml`), and stale issue/PR handling (`stale-issues-pullrequests.yml`). All workflows run `git lfs pull` before using repo contents.
+
+______________________________________________________________________
+
+## 2. Strict Safety & Operational Rules (Always Enforced)
+
+- **NEVER AUTO-MERGE TO MAIN**: AI agents **MUST NEVER** merge PRs, execute `git merge`, or directly push commits to the `main` branch autonomously.
+- **NEVER PROPOSE COMMITS OR PUSHES UNPROMPTED**: AI agents **MUST NEVER** prompt the user to commit or push, nor propose commit messages unprompted. When instructed by the user or when creating/updating pull requests on topic branches, agents may execute `git commit` and `git push` directly without seeking confirmation.
+- **Mandatory Human Approval**: AI agents may create branches, create commits, push topic branches, propose PRs, format code, and run test suites, but the final action of merging changes into `main` rests strictly with the human maintainer.
+- **Verification Before Submitting**: All changes must pass `nix fmt -- --fail-on-change`, `zig build`, and `zig build test`.
+- **Conventional Commits**: Use conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `test:`), optionally with a scope (e.g. `build(flake.lock):`).
+- **Evidence First**: Base all answers and actions on actual file contents and command output. Never speculate or assume.
+- **Non-Destructive**: Never perform irreversible actions (file deletions, hard resets, remote push, Git LFS asset removal) without explicit user approval.
+- **Targeted Edits**: Make minimal, logical changes strictly necessary for the request. Do not modify unrelated files.
+- **English-Only Documentation**: All repository documentation, agent skills, code comments, commit messages, and PR descriptions must be written strictly in English.
+- **Explicit Milestone Assignment Only**: AI agents **MUST NEVER** automatically attach or set GitHub Milestones on Pull Requests or Issues unless explicitly requested or instructed by the user.
+
+______________________________________________________________________
+
+## 3. Status Assessment Workflow
+
+When asked to check status, assess the situation, or understand workspace context:
+
+1. **Local Git State**: Inspect working tree (`git status -s -b`) and recent commits (`git log -n 5 --oneline`).
+1. **GitHub PRs (always display)**: List **all** open PRs (`gh pr list`) and check the current branch's PR (`gh pr status`). Never skip this step, even when the local state is clean.
+1. **GitHub Issues (always display)**: List **all** open issues (`gh issue list`). Never skip this step.
+1. **Environment Health**: Verify build and test status (`nix fmt -- --fail-on-change`, `zig build`, `zig build test`).
+1. **Synthesis**: Report a concise, structured status covering local state, remote GitHub state, and environment health. The report **must** include the open PR and Issue lists (number, title, and state), or explicitly state that there are none.
+
+______________________________________________________________________
+
+## 4. Workspace Skills
+
+Detailed runbooks and procedural workflows are maintained as workspace skills under `.agents/skills/`:
+
+| Trigger / Context | Skill to Read | Purpose |
+| :--- | :--- | :--- |
+| Deep investigation, complex code search | [`investigate`](.agents/skills/investigate/SKILL.md) | Non-destructive investigation guidelines |
+| Commit conventions & policies | [`git-commit`](.agents/skills/git-commit/SKILL.md) | Commit conventions and prohibition of unprompted commit/push proposals |
+| Deleting files, overwriting, git push/reset | [`irreversible`](.agents/skills/irreversible/SKILL.md) | Pre-checks and confirmation prompts |
+| Testing, verifying builds or behavior | [`verify`](.agents/skills/verify/SKILL.md) | Minimal, high-signal verification steps |
+| Bumping `flake.lock`, Zig version, or adding Git LFS test assets | [`update-dependencies`](.agents/skills/update-dependencies/SKILL.md) | Procedures for Nix input updates, Zig version bumps, and LFS fixtures |
+| Preparing PRs, formatting, pre-submission checks | [`pr-workflow`](.agents/skills/pr-workflow/SKILL.md) | Verification command table, commit rules, and PR requirements |
