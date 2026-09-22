@@ -318,34 +318,49 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) anyerr
 /// Errors:
 ///   - Any error from the reader.
 pub fn read(allocator: std.mem.Allocator, reader: anytype) anyerror!Chunk {
+    // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
+    const four_cc_len = 4;
+    const header_len = four_cc_len + @sizeOf(u32);
+    // RIFF/LIST containers have an extra type FourCC right after the header.
+    const container_header_len = header_len + four_cc_len;
+
     const buffer = reader.buffered();
 
-    if (buffer.len < 8)
+    if (buffer.len < header_len)
         return error.InvalidFormat;
 
-    const id = buffer[0..4];
-    const size = std.mem.readInt(u32, buffer[4..8], .little);
+    const id = buffer[0..four_cc_len];
+    const size = std.mem.readInt(u32, buffer[four_cc_len..header_len], .little);
 
     if (std.mem.eql(u8, id, "RIFF")) {
-        if (buffer.len < 12)
+        if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
 
-        const four_cc = buffer[8..12];
-        const chunks = try to_chunk_list(allocator, buffer[12..]);
+        const data_end = header_len + size;
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
+        const four_cc = buffer[header_len..container_header_len];
+        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end]);
         return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else if (std.mem.eql(u8, id, "LIST")) {
-        if (buffer.len < 12)
+        if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
-        const four_cc = buffer[8..12];
-        const chunks = try to_chunk_list(allocator, buffer[12..]);
+
+        const data_end = header_len + size;
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
+        const four_cc = buffer[header_len..container_header_len];
+        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end]);
         return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
     } else {
-        const data_end = 8 + size;
+        const data_end = header_len + size;
 
         if (buffer.len < data_end)
             return error.SizeMismatch;
 
-        const data = try allocator.dupe(u8, buffer[8..data_end]);
+        const data = try allocator.dupe(u8, buffer[header_len..data_end]);
         return Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = data } };
     }
 }
@@ -541,6 +556,38 @@ test "riff_chunk serialization" {
 
     const chunk_file: []const u8 = @embedFile("assets/riff-files/riff_chunk.riff");
     try std.testing.expectEqualSlices(u8, chunk_file, riff_chunk_data);
+}
+
+test "riff_chunk trailing bytes after the declared size are not absorbed as sub-chunks" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: a well-formed, complete top-level RIFF chunk followed by
+    // extra trailing bytes (e.g. concatenated files, trailer metadata) must not
+    // have those trailing bytes parsed as additional sub-chunks; read() must
+    // bound its parsing to the RIFF chunk's own declared `size`.
+    const riff_chunk = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "AB" } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(riff_chunk, allocator, &w.writer);
+    const riff_chunk_data = w.written();
+
+    const trailing = "JUNK" ++ "\x02\x00\x00\x00";
+    const buffer = try allocator.alloc(u8, riff_chunk_data.len + trailing.len);
+    defer allocator.free(buffer);
+    @memcpy(buffer[0..riff_chunk_data.len], riff_chunk_data);
+    @memcpy(buffer[riff_chunk_data.len..], trailing);
+
+    var reader = std.Io.Reader.fixed(buffer);
+    const parsed: Chunk = try read(allocator, &reader);
+    defer parsed.deinit(allocator);
+
+    try std.testing.expectEqualDeep(riff_chunk, parsed);
 }
 
 test "FluidR3_GM2-2.sf2 serialization" {
