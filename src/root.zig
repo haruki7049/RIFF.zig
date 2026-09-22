@@ -466,7 +466,11 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) 
 
         const id = bytes[pos .. pos + 4][0..4];
         const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
-        const next_pos = pos + 8 + size;
+
+        // Widen to usize before adding: on a 32-bit target `usize` is `u32`,
+        // so an unwidened `pos + 8 + size` can overflow for a `size` near
+        // `maxInt(u32)` the same way `header_len + size` did before #43.
+        const next_pos = pos + 8 + @as(usize, size);
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
