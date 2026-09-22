@@ -567,6 +567,29 @@ test "write returns PayloadTooLarge instead of panicking for oversized chunk dat
     try std.testing.expectError(error.PayloadTooLarge, write(chunk, allocator, &w.writer));
 }
 
+test "write returns PayloadTooLarge for children whose sizes fit individually but overflow in aggregate" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: the previous test only exercises the leaf-level
+    // std.math.cast(u32, data.len) check in serialized_size(). The separate
+    // aggregate-sum check in container_children_size() - two children each
+    // individually within the u32 limit, but whose combined encoded size
+    // exceeds it - was untested. As with the other regression test, build
+    // slices whose length is huge without actually allocating: write() never
+    // dereferences `.data` before the size checks run.
+    const child_len: usize = std.math.maxInt(u32) - 100;
+    const fake_data: []const u8 = @as([*]const u8, @ptrFromInt(1))[0..child_len];
+    const child = Chunk{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = fake_data } };
+    const list_chunk = Chunk{ .list = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{ child, child },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try std.testing.expectError(error.PayloadTooLarge, write(list_chunk, allocator, &w.writer));
+}
+
 test "write performs no allocation for nested .list/.riff containers" {
     // Regression test: write()'s .list/.riff branches used to build each
     // nesting level's serialized children in a temporary
@@ -682,6 +705,37 @@ test "a nested .riff chunk round-trips instead of losing its structure" {
     try std.testing.expectEqualDeep(list_chunk, parsed);
 }
 
+test "a .riff chunk nested inside another .riff chunk round-trips" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: the nested .riff round-trip test above only covers
+    // .riff nested inside .list. #38/#46's fix is not specific to .list as
+    // the outer container, so cover the more literal "nested RIFF" case
+    // too: .riff directly inside .riff.
+    const riff_chunk = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .riff = .{
+                .four_cc = try FourCC.new("SUB1"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "hi" } },
+                },
+            } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(riff_chunk, allocator, &w.writer);
+    const riff_chunk_data: []u8 = w.written();
+
+    var reader = std.Io.Reader.fixed(riff_chunk_data);
+    const parsed: Chunk = try read(allocator, &reader);
+    defer parsed.deinit(allocator);
+
+    try std.testing.expectEqualDeep(riff_chunk, parsed);
+}
+
 test "riff_chunk serialization" {
     const allocator = std.testing.allocator;
 
@@ -787,54 +841,61 @@ test "read returns SizeMismatch instead of panicking for a near-max RIFF/LIST de
     }
 }
 
-test "read returns InvalidFormat for a nested LIST without room for its type FourCC" {
+test "read returns InvalidFormat for a nested RIFF/LIST without room for its type FourCC" {
     const allocator = std.testing.allocator;
 
-    // Nested LIST declares a 2-byte payload, leaving no room for its own
-    // 4-byte type FourCC.
-    const nested_list = "LIST" ++ "\x02\x00\x00\x00" ++ "XY";
-    const buffer = "RIFF" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ nested_list;
+    inline for (.{ "LIST", "RIFF" }) |nested_id| {
+        // Nested container declares a 2-byte payload, leaving no room for
+        // its own 4-byte type FourCC. Since #46, a nested "RIFF" hits the
+        // identical check as "LIST" in to_chunk_list().
+        const nested = nested_id ++ "\x02\x00\x00\x00" ++ "XY";
+        const buffer = "RIFF" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ nested;
 
-    var reader = std.Io.Reader.fixed(buffer);
-    try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+    }
 }
 
-test "read returns NestingTooDeep instead of overflowing the stack for excessively nested LIST chunks" {
+test "read returns NestingTooDeep instead of overflowing the stack for excessively nested RIFF/LIST chunks" {
     const allocator = std.testing.allocator;
 
-    // Regression test: to_chunk_list() used to recurse once per nested LIST
-    // chunk with no depth limit, so adversarial input with many trivially
-    // nested LIST chunks (12 bytes of overhead each) could overflow the call
-    // stack before any error was returned. Build a chain nested one level
-    // deeper than max_nesting_depth and confirm read() reports
-    // NestingTooDeep instead of crashing.
+    // Regression test: to_chunk_list() used to recurse once per nested
+    // LIST/RIFF chunk with no depth limit, so adversarial input with many
+    // trivially nested containers (12 bytes of overhead each) could
+    // overflow the call stack before any error was returned. Build a chain
+    // nested one level deeper than max_nesting_depth and confirm read()
+    // reports NestingTooDeep instead of crashing - for a chain nested (and
+    // entered at the top level) via "LIST" and, separately, via "RIFF",
+    // since #46 made to_chunk_list() treat nested "RIFF" identically to
+    // "LIST".
+    inline for (.{ "LIST", "RIFF" }) |id| {
+        // Innermost leaf: a plain chunk with no payload.
+        var prev = try allocator.dupe(u8, "DATA" ++ "\x00\x00\x00\x00");
+        defer allocator.free(prev);
 
-    // Innermost leaf: a plain chunk with no payload.
-    var prev = try allocator.dupe(u8, "DATA" ++ "\x00\x00\x00\x00");
-    defer allocator.free(prev);
+        var depth: usize = 0;
+        while (depth <= max_nesting_depth) : (depth += 1) {
+            const size: u32 = @intCast(4 + prev.len); // type FourCC (4) + children (prev)
+            const wrapped = try allocator.alloc(u8, 12 + prev.len);
+            @memcpy(wrapped[0..4], id);
+            std.mem.writeInt(u32, wrapped[4..8], size, .little);
+            @memcpy(wrapped[8..12], "TYPE");
+            @memcpy(wrapped[12..], prev);
+            allocator.free(prev);
+            prev = wrapped;
+        }
 
-    var depth: usize = 0;
-    while (depth <= max_nesting_depth) : (depth += 1) {
-        const size: u32 = @intCast(4 + prev.len); // type FourCC (4) + children (prev)
-        const wrapped = try allocator.alloc(u8, 12 + prev.len);
-        @memcpy(wrapped[0..4], "LIST");
-        std.mem.writeInt(u32, wrapped[4..8], size, .little);
-        @memcpy(wrapped[8..12], "TYPE");
-        @memcpy(wrapped[12..], prev);
-        allocator.free(prev);
-        prev = wrapped;
+        const outer_size: u32 = @intCast(4 + prev.len);
+        const buffer = try allocator.alloc(u8, 12 + prev.len);
+        defer allocator.free(buffer);
+        @memcpy(buffer[0..4], id);
+        std.mem.writeInt(u32, buffer[4..8], outer_size, .little);
+        @memcpy(buffer[8..12], "TEST");
+        @memcpy(buffer[12..], prev);
+
+        var reader = std.Io.Reader.fixed(buffer);
+        try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
     }
-
-    const riff_size: u32 = @intCast(4 + prev.len);
-    const buffer = try allocator.alloc(u8, 12 + prev.len);
-    defer allocator.free(buffer);
-    @memcpy(buffer[0..4], "RIFF");
-    std.mem.writeInt(u32, buffer[4..8], riff_size, .little);
-    @memcpy(buffer[8..12], "TEST");
-    @memcpy(buffer[12..], prev);
-
-    var reader = std.Io.Reader.fixed(buffer);
-    try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
 }
 
 test "to_chunk_list does not leak a chunk's data if appending it to the list fails" {
@@ -867,30 +928,34 @@ test "read accepts exactly one trailing zero pad byte inside a container but rej
     // in the RIFF spec (only a single pad byte, to keep the overall size
     // even, is ever standard). That could mask truncated/corrupted data as
     // valid. A single trailing zero byte must still be accepted; anything
-    // beyond that must be rejected as InvalidFormat.
+    // beyond that must be rejected as InvalidFormat. Checked for both a
+    // "RIFF"- and a "LIST"-wrapped container, since both share the same
+    // to_chunk_list() check.
     const child = "data" ++ "\x02\x00\x00\x00" ++ "AB"; // even-sized, no pad needed
 
-    {
-        // Exactly one trailing zero byte: accepted.
-        const children = child ++ "\x00";
-        const buffer = "RIFF" ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
-        var reader = std.Io.Reader.fixed(buffer);
-        const parsed = try read(allocator, &reader);
-        defer parsed.deinit(allocator);
-    }
-    {
-        // Two trailing zero bytes: rejected.
-        const children = child ++ "\x00\x00";
-        const buffer = "RIFF" ++ "\x10\x00\x00\x00" ++ "TEST" ++ children;
-        var reader = std.Io.Reader.fixed(buffer);
-        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
-    }
-    {
-        // One trailing non-zero byte: rejected.
-        const children = child ++ "\x01";
-        const buffer = "RIFF" ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
-        var reader = std.Io.Reader.fixed(buffer);
-        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        {
+            // Exactly one trailing zero byte: accepted.
+            const children = child ++ "\x00";
+            const buffer = id ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+        }
+        {
+            // Two trailing zero bytes: rejected.
+            const children = child ++ "\x00\x00";
+            const buffer = id ++ "\x10\x00\x00\x00" ++ "TEST" ++ children;
+            var reader = std.Io.Reader.fixed(buffer);
+            try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+        }
+        {
+            // One trailing non-zero byte: rejected.
+            const children = child ++ "\x01";
+            const buffer = id ++ "\x0f\x00\x00\x00" ++ "TEST" ++ children;
+            var reader = std.Io.Reader.fixed(buffer);
+            try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+        }
     }
 }
 
