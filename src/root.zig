@@ -220,8 +220,8 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
 ///   - `allocator`: Unused by `write()` itself; kept for API stability. `write()` performs no
 ///     allocation of its own.
-///   - `writer`: The writer interface to output the serialized binary data (e.g., `file.writer()`, `std.Io.Writer`).
-///     Must conform to `std.Io.Writer`'s error contract (`std.Io.Writer.Error`).
+///   - `writer`: The `std.Io.Writer` to output the serialized binary data to (e.g. `&file_writer.interface`,
+///     `&std.Io.Writer.Allocating.writer`).
 ///
 /// Returns: `void` on success.
 ///
@@ -230,7 +230,7 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///   - `PayloadTooLarge`: If a `.chunk`'s data length, or any `.list`/`.riff` chunk's
 ///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
 ///     fields are 32-bit).
-pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: anytype) WriteError!void {
+pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) WriteError!void {
     switch (chunk) {
         .chunk => |b| {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
@@ -353,9 +353,8 @@ fn container_children_size(chunks: []const Chunk) error{PayloadTooLarge}!u32 {
 ///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
-///   - `reader`: The reader interface to read RIFF chunk binary data from (must have a
-///     `buffered()` method). Its buffer must already contain the entire chunk being
-///     parsed; see "Buffering Requirement" below.
+///   - `reader`: The `std.Io.Reader` to read RIFF chunk binary data from. Its buffer must
+///     already contain the entire chunk being parsed; see "Buffering Requirement" below.
 ///
 /// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
@@ -364,7 +363,7 @@ fn container_children_size(chunks: []const Chunk) error{PayloadTooLarge}!u32 {
 ///   - `SizeMismatch`: If a chunk's declared size extends beyond the available buffered data.
 ///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
 ///   - `OutOfMemory`: If allocating a chunk's data payload or a sub-chunk array fails.
-pub fn read(allocator: std.mem.Allocator, reader: anytype) ReadError!Chunk {
+pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chunk {
     // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
     const four_cc_len = 4;
     const header_len = four_cc_len + @sizeOf(u32);
