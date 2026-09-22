@@ -459,6 +459,7 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) 
             } });
         } else {
             const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
+            errdefer allocator.free(chunk_data);
             try list.append(allocator, Chunk{ .chunk = .{
                 .four_cc = try FourCC.new(id),
                 .data = chunk_data,
@@ -722,6 +723,28 @@ test "read returns NestingTooDeep instead of overflowing the stack for excessive
 
     var reader = std.Io.Reader.fixed(buffer);
     try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
+}
+
+test "to_chunk_list does not leak a chunk's data if appending it to the list fails" {
+    // Regression test: if allocator.dupe() for a leaf chunk's data succeeded
+    // but the subsequent list.append() then failed (e.g. array growth OOM),
+    // the duplicated data was never freed - it wasn't yet part of list.items,
+    // so to_chunk_list's own errdefer (which frees already-appended chunks)
+    // never reached it. Sweep a few failure points instead of hardcoding the
+    // exact internal allocation count, and rely on std.testing.allocator's
+    // own leak detector to fail this test if anything goes unfreed.
+    const buffer = "LIST" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ "data" ++ "\x02\x00\x00\x00" ++ "AB";
+
+    var fail_index: usize = 0;
+    while (fail_index < 4) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        const allocator = failing.allocator();
+
+        var reader = std.Io.Reader.fixed(buffer);
+        if (read(allocator, &reader)) |chunk| {
+            chunk.deinit(allocator);
+        } else |_| {}
+    }
 }
 
 test "FluidR3_GM2-2.sf2 serialization" {
