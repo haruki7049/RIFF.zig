@@ -445,18 +445,24 @@ fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) 
 
         if (next_pos > bytes.len) return error.SizeMismatch;
 
-        if (std.mem.eql(u8, id, "LIST")) {
+        // A nested "RIFF" is handled identically to "LIST": both are just a
+        // container header (id + size + type FourCC) followed by sub-chunks.
+        // write() already serializes a nested `.riff` this way, so read() must
+        // recognize it too, or the nested chunk round-trips back as an opaque
+        // `.chunk` leaf instead of its original `.riff` structure.
+        if (std.mem.eql(u8, id, "LIST") or std.mem.eql(u8, id, "RIFF")) {
             if (next_pos < pos + 12) return error.InvalidFormat;
-            const list_type = bytes[pos + 8 .. pos + 12][0..4];
+            const container_type = bytes[pos + 8 .. pos + 12][0..4];
             const sub_chunks = try to_chunk_list(allocator, bytes[pos + 12 .. next_pos], depth + 1);
             errdefer {
                 for (sub_chunks) |c| c.deinit(allocator);
                 allocator.free(sub_chunks);
             }
-            try list.append(allocator, Chunk{ .list = .{
-                .four_cc = try FourCC.new(list_type),
-                .chunks = sub_chunks,
-            } });
+            const four_cc = try FourCC.new(container_type);
+            try list.append(allocator, if (std.mem.eql(u8, id, "LIST"))
+                Chunk{ .list = .{ .four_cc = four_cc, .chunks = sub_chunks } }
+            else
+                Chunk{ .riff = .{ .four_cc = four_cc, .chunks = sub_chunks } });
         } else {
             const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
             errdefer allocator.free(chunk_data);
@@ -555,6 +561,38 @@ test "list_chunk with an odd-sized chunk followed by a sibling chunk round-trips
         .chunks = &.{
             .{ .chunk = .{ .four_cc = try FourCC.new("odd1"), .data = "A" } },
             .{ .chunk = .{ .four_cc = try FourCC.new("even"), .data = "BB" } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try write(list_chunk, allocator, &w.writer);
+    const list_chunk_data: []u8 = w.written();
+
+    var reader = std.Io.Reader.fixed(list_chunk_data);
+    const parsed: Chunk = try read(allocator, &reader);
+    defer parsed.deinit(allocator);
+
+    try std.testing.expectEqualDeep(list_chunk, parsed);
+}
+
+test "a nested .riff chunk round-trips instead of losing its structure" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: write() already serializes a nested `.riff` chunk
+    // (nothing restricts `.riff` to the top level), but to_chunk_list() used
+    // to only special-case "LIST", so a nested "RIFF" id fell through to the
+    // generic leaf branch and came back as an opaque `.chunk` with undecoded
+    // bytes instead of its original `.riff` structure.
+    const list_chunk = Chunk{ .list = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .riff = .{
+                .four_cc = try FourCC.new("SUB1"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("data"), .data = "hi" } },
+                },
+            } },
         },
     } };
 
