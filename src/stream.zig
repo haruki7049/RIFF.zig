@@ -775,91 +775,6 @@ test "stream: differential against the reference parser on deeply nested input a
     }
 }
 
-// Walks `input` with an Iterator through a 7-byte reader buffer and appends a
-// description of every event to `trace`. With `rand`, each chunk's payload is
-// accessed in a random way (skipped, data(), readDataAlloc(), or a partial
-// read through dataReader()); without it, every payload is skipped. Returns
-// the error that ended the walk, or null on a clean end.
-fn walkEvents(a: std.mem.Allocator, input: []const u8, total_len: ?u64, rand: ?std.Random, trace: *std.Io.Writer.Allocating) !?anyerror {
-    var src: std.Io.Reader = .fixed(input);
-    var buf: [7]u8 = undefined;
-    var lim = src.limited(.unlimited, &buf);
-    var it = Iterator.init(&lim.interface, .{ .total_len = total_len });
-
-    while (true) {
-        // Returned as a value (not propagated): a failed walk is a result to compare.
-        const ev = (it.next() catch |e| return @as(?anyerror, e)) orelse return null;
-        switch (ev) {
-            .begin_container => |b| try trace.writer.print("B{t}{d}{s};", .{ b.kind, b.size, &b.four_cc.inner }),
-            .end_container => |k| try trace.writer.print("E{t};", .{k}),
-            .chunk => |c| {
-                try trace.writer.print("C{d}{s};", .{ c.size, &c.four_cc.inner });
-                const r = rand orelse continue;
-                // Errors from the accessors are ignored: a failed read is
-                // sticky and next() reports it, exactly where skipping the
-                // payload would have failed.
-                switch (r.uintLessThan(u8, 4)) {
-                    0 => {},
-                    1 => _ = it.data() catch {},
-                    2 => if (it.readDataAlloc(a)) |p| a.free(p) else |err| {
-                        if (err == error.OutOfMemory) return err;
-                    },
-                    else => {
-                        var piece: [3]u8 = undefined;
-                        if (it.dataReader(&piece)) |dr| {
-                            // take() needs a length within the reader's buffer.
-                            _ = dr.take(r.uintLessThan(usize, piece.len + 1)) catch {};
-                        } else |_| {}
-                    },
-                }
-            },
-        }
-    }
-}
-
-fn errorName(e: ?anyerror) []const u8 {
-    return if (e) |x| @errorName(x) else "none";
-}
-
-test "stream: mixing data()/readDataAlloc()/dataReader() with skipping never changes the events or the final error" {
-    // The differential tests above only drive readTree(), which always reads
-    // each payload whole with readDataAlloc(). Check the other payload accessors
-    // and partial reads under mutated and truncated input: whatever the caller
-    // does with a payload, the events and the terminal error must be the same
-    // as when every payload is skipped, with and without total_len.
-    const a = testing.allocator;
-    var prng = std.Random.DefaultPrng.init(0xacce55);
-    const rand = prng.random();
-    var buf: [128]u8 = undefined;
-
-    for (samples[0..4]) |seed| {
-        for (0..3000) |_| {
-            @memcpy(buf[0..seed.len], seed);
-            const len = mutate(rand, &buf, seed.len);
-            const input = buf[0..len];
-
-            for ([_]?u64{ null, input.len }) |total_len| {
-                var base = std.Io.Writer.Allocating.init(a);
-                defer base.deinit();
-                const base_err = try walkEvents(a, input, total_len, null, &base);
-
-                var mixed = std.Io.Writer.Allocating.init(a);
-                defer mixed.deinit();
-                const mixed_err = try walkEvents(a, input, total_len, rand, &mixed);
-
-                testing.expectEqualStrings(base.written(), mixed.written()) catch |e| {
-                    std.debug.print("events differ (total_len={?d}): {x}\n", .{ total_len, input });
-                    return e;
-                };
-                testing.expectEqualStrings(errorName(base_err), errorName(mixed_err)) catch |e| {
-                    std.debug.print("final error differs (total_len={?d}): {x}\n", .{ total_len, input });
-                    return e;
-                };
-            }
-        }
-    }
-}
-
 test "stream: a tiny input claiming a huge chunk fails without a huge allocation" {
     // 256 KiB is far below the ~4 GiB the headers claim: trusting the size
     // field would fail with OutOfMemory instead of SizeMismatch.
@@ -1205,4 +1120,89 @@ test "stream: the payload is still available after BufferTooSmall from data()" {
     const got = try it.readDataAlloc(testing.allocator);
     defer testing.allocator.free(got);
     try testing.expectEqualStrings("ABCDEFGH", got);
+}
+
+// Walks `input` with an Iterator through a 7-byte reader buffer and appends a
+// description of every event to `trace`. With `rand`, each chunk's payload is
+// accessed in a random way (skipped, data(), readDataAlloc(), or a partial
+// read through dataReader()); without it, every payload is skipped. Returns
+// the error that ended the walk, or null on a clean end.
+fn walkEvents(a: std.mem.Allocator, input: []const u8, total_len: ?u64, rand: ?std.Random, trace: *std.Io.Writer.Allocating) !?anyerror {
+    var src: std.Io.Reader = .fixed(input);
+    var buf: [7]u8 = undefined;
+    var lim = src.limited(.unlimited, &buf);
+    var it = Iterator.init(&lim.interface, .{ .total_len = total_len });
+
+    while (true) {
+        // Returned as a value (not propagated): a failed walk is a result to compare.
+        const ev = (it.next() catch |e| return @as(?anyerror, e)) orelse return null;
+        switch (ev) {
+            .begin_container => |b| try trace.writer.print("B{t}{d}{s};", .{ b.kind, b.size, &b.four_cc.inner }),
+            .end_container => |k| try trace.writer.print("E{t};", .{k}),
+            .chunk => |c| {
+                try trace.writer.print("C{d}{s};", .{ c.size, &c.four_cc.inner });
+                const r = rand orelse continue;
+                // Errors from the accessors are ignored: a failed read is
+                // sticky and next() reports it, exactly where skipping the
+                // payload would have failed.
+                switch (r.uintLessThan(u8, 4)) {
+                    0 => {},
+                    1 => _ = it.data() catch {},
+                    2 => if (it.readDataAlloc(a)) |p| a.free(p) else |err| {
+                        if (err == error.OutOfMemory) return err;
+                    },
+                    else => {
+                        var piece: [3]u8 = undefined;
+                        if (it.dataReader(&piece)) |dr| {
+                            // take() needs a length within the reader's buffer.
+                            _ = dr.take(r.uintLessThan(usize, piece.len + 1)) catch {};
+                        } else |_| {}
+                    },
+                }
+            },
+        }
+    }
+}
+
+fn errorName(e: ?anyerror) []const u8 {
+    return if (e) |x| @errorName(x) else "none";
+}
+
+test "stream: mixing data()/readDataAlloc()/dataReader() with skipping never changes the events or the final error" {
+    // The differential tests above only drive readTree(), which always reads
+    // each payload whole with readDataAlloc(). Check the other payload accessors
+    // and partial reads under mutated and truncated input: whatever the caller
+    // does with a payload, the events and the terminal error must be the same
+    // as when every payload is skipped, with and without total_len.
+    const a = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xacce55);
+    const rand = prng.random();
+    var buf: [128]u8 = undefined;
+
+    for (samples[0..4]) |seed| {
+        for (0..3000) |_| {
+            @memcpy(buf[0..seed.len], seed);
+            const len = mutate(rand, &buf, seed.len);
+            const input = buf[0..len];
+
+            for ([_]?u64{ null, input.len }) |total_len| {
+                var base = std.Io.Writer.Allocating.init(a);
+                defer base.deinit();
+                const base_err = try walkEvents(a, input, total_len, null, &base);
+
+                var mixed = std.Io.Writer.Allocating.init(a);
+                defer mixed.deinit();
+                const mixed_err = try walkEvents(a, input, total_len, rand, &mixed);
+
+                testing.expectEqualStrings(base.written(), mixed.written()) catch |e| {
+                    std.debug.print("events differ (total_len={?d}): {x}\n", .{ total_len, input });
+                    return e;
+                };
+                testing.expectEqualStrings(errorName(base_err), errorName(mixed_err)) catch |e| {
+                    std.debug.print("final error differs (total_len={?d}): {x}\n", .{ total_len, input });
+                    return e;
+                };
+            }
+        }
+    }
 }
