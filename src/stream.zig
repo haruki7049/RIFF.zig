@@ -665,11 +665,6 @@ test "stream: skip everything but one chunk, streamed in 256-byte pieces" {
     try testing.expectEqual(std.hash.Wyhash.hash(0, expected), hasher.final());
 }
 
-// Differential check on corrupted inputs: the reference parser and readTree()
-// must agree on success vs failure (and on the tree when both succeed). With
-// `Options.total_len` the error kind must match too; without it, it may
-// differ, since the reference parser checks the top-level size before the
-// children and a stream of unknown length cannot.
 // Applies one random corruption to `buf[0..len]` (truncation, a few byte
 // flips, or a rewritten size field) and returns the new length.
 fn mutate(rand: std.Random, buf: []u8, len_in: usize) usize {
@@ -687,8 +682,12 @@ fn mutate(rand: std.Random, buf: []u8, len_in: usize) usize {
     return len;
 }
 
-// Checks that the reference parser and readTree() agree on `input`, both
-// with and without `Options.total_len`, and both fed through a 1-byte buffer.
+// Differential check on a possibly corrupted `input`: the reference parser and
+// readTree() must agree on success vs failure (and on the tree when both
+// succeed), with and without `Options.total_len`, both fed through a 1-byte
+// buffer. With `total_len` the error kind must match too; without it, it may
+// differ, since the reference parser checks the top-level size before the
+// children and a stream of unknown length cannot.
 fn expectAgreesWithReference(a: std.mem.Allocator, input: []const u8) !void {
     var r1: std.Io.Reader = .fixed(input);
     const old = referenceRead(a, &r1);
