@@ -1,6 +1,5 @@
-//! PROTOTYPE: a pull-style streaming RIFF parser (`Iterator`) and a tree
-//! builder (`readTree`) layered on top of it, as a candidate replacement for
-//! the buffer-only `read()`.
+//! A pull-style streaming RIFF parser (`Iterator`) and the tree builder
+//! (`readTree`) layered on top of it, which `riff.read()` is implemented with.
 //!
 //! `Iterator` turns a byte stream into a sequence of `Event`s, one chunk
 //! header at a time. It needs no allocation and works with any
@@ -18,6 +17,10 @@ const max_nesting_depth = riff.max_nesting_depth;
 pub const Error = riff.ToChunkListError || FourCC.NewError || error{
     /// The underlying reader failed (I/O error).
     ReadFailed,
+};
+
+/// Errors of `Iterator.data()`, which borrows from the reader's buffer.
+pub const DataError = Error || error{
     /// `data()` was called on a chunk larger than the reader's buffer.
     BufferTooSmall,
 };
@@ -44,8 +47,7 @@ pub const Options = struct {
     /// if known (e.g. a file's size, or a fixed buffer's length).
     ///
     /// When set, the top-level chunk's declared size is checked against it
-    /// before anything is read or allocated - the same checks, in the same
-    /// order, as `read()` makes against its buffer - so every nested size is
+    /// before anything is read or allocated, so every nested size is
     /// bounded by real input and `readDataAlloc()` can allocate each payload
     /// in one piece. If the input turns out shorter than `total_len`, reads
     /// still fail with `SizeMismatch`; only the allocation sizes trust it.
@@ -99,7 +101,7 @@ pub const Iterator = struct {
         const end = it.ends[it.depth - 1];
         var left = end - it.pos;
 
-        // Same rule as to_chunk_list(): a single trailing zero byte is padding,
+        // A single trailing zero byte is padding,
         // anything else too short for a header is malformed.
         if (left > 0 and left < 8) {
             if (left != 1) return error.InvalidFormat;
@@ -124,7 +126,7 @@ pub const Iterator = struct {
         const child_end = it.pos + size;
         if (child_end > end) return error.SizeMismatch;
         // Pad byte only if the container actually has room for it (matches
-        // to_chunk_list(), which tolerates a missing final pad).
+        // the reference parser, which tolerates a missing final pad).
         const pad: u1 = if (size % 2 == 1 and child_end < end) 1 else 0;
 
         if (isContainer(id)) {
@@ -143,7 +145,7 @@ pub const Iterator = struct {
 
     /// Borrows the whole payload of the current chunk from the reader's
     /// buffer. Valid until the next call on this iterator.
-    pub fn data(it: *Iterator) Error![]const u8 {
+    pub fn data(it: *Iterator) DataError![]const u8 {
         std.debug.assert(it.limited == null);
         const n: usize = @intCast(it.pending);
         if (n > it.reader.buffer.len) return error.BufferTooSmall;
@@ -194,7 +196,7 @@ pub const Iterator = struct {
         return &it.limited.?.interface;
     }
 
-    /// Checks mirror read(): short header or container header ->
+    /// Short header or container header ->
     /// InvalidFormat, declared size beyond the input -> SizeMismatch. The
     /// size check needs `total_len`; without it, a short input is only
     /// detected when reading runs out.
@@ -259,11 +261,13 @@ pub const Iterator = struct {
     }
 };
 
-/// Builds the same `Chunk` tree as `read()`, but pulls from `reader`
-/// incrementally, so any buffer size works (no whole-file buffering needed).
-/// Pass `Options.total_len` whenever the input length is known: it makes
-/// errors match `read()` exactly and allocates each payload in one piece.
-pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: Options) (Error || std.mem.Allocator.Error)!Chunk {
+/// Builds a `Chunk` tree by pulling from `reader` incrementally, so any buffer
+/// size works (no whole-file buffering needed). This is what `riff.read()`
+/// calls with default options. Pass `Options.total_len` whenever the input
+/// length is known: the declared size is then checked against it up front, so
+/// a truncated input is reported the same way regardless of where it is cut,
+/// and each payload is allocated in one piece.
+pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: Options) riff.ReadError!Chunk {
     const Frame = struct { kind: Kind, four_cc: FourCC, list: std.array_list.Aligned(Chunk, null) };
 
     var it = Iterator.init(reader, options);
@@ -341,6 +345,128 @@ const samples = [_][]const u8{
     @embedFile("assets/riff-files/FluidR3_GM2-2.sf2"),
 };
 
+// Reference implementation for the differential tests below: the buffer-only
+// parser `riff.read()` used before it was rebuilt on `Iterator`. It needs the
+// whole input already buffered. Test-only; kept so `readTree()` stays checked
+// against an independently written parser.
+fn referenceRead(allocator: std.mem.Allocator, reader: *std.Io.Reader) riff.ReadError!Chunk {
+    // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
+    const four_cc_len = 4;
+    const header_len = four_cc_len + @sizeOf(u32);
+    // RIFF/LIST containers have an extra type FourCC right after the header.
+    const container_header_len = header_len + four_cc_len;
+
+    const buffer = reader.buffered();
+
+    if (buffer.len < header_len)
+        return error.InvalidFormat;
+
+    const id = buffer[0..four_cc_len];
+    const size = std.mem.readInt(u32, buffer[four_cc_len..header_len], .little);
+
+    const is_riff = std.mem.eql(u8, id, "RIFF");
+    const is_list = std.mem.eql(u8, id, "LIST");
+    if (is_riff or is_list) {
+        if (buffer.len < container_header_len or size < four_cc_len)
+            return error.InvalidFormat;
+
+        // Widen to usize before adding: `header_len` is a comptime_int with no
+        // usize operand in this expression, so `header_len + size` would stay
+        // u32-typed and overflow-panic for `size` near `maxInt(u32)`.
+        const data_end: usize = header_len + @as(usize, size);
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
+        const four_cc = buffer[header_len..container_header_len];
+        const chunks = try referenceToChunkList(allocator, buffer[container_header_len..data_end], 0);
+        const container: riff.Container = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks };
+        return if (is_riff) Chunk{ .riff = container } else Chunk{ .list = container };
+    } else {
+        const data_end: usize = header_len + @as(usize, size);
+
+        if (buffer.len < data_end)
+            return error.SizeMismatch;
+
+        const data = try allocator.dupe(u8, buffer[header_len..data_end]);
+        return Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = data } };
+    }
+}
+
+fn referenceToChunkList(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) (riff.ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
+    if (depth > max_nesting_depth)
+        return error.NestingTooDeep;
+
+    var list: std.array_list.Aligned(Chunk, null) = .empty;
+    errdefer {
+        for (list.items) |c| c.deinit(allocator);
+        list.deinit(allocator);
+    }
+
+    var pos: usize = 0;
+    while (pos < bytes.len) {
+        // Need at least 8 bytes for chunk header (FourCC + size)
+        if (pos + 8 > bytes.len) {
+            // The RIFF spec only pads a chunk with a single zero byte, to
+            // keep the container's overall size even, after an odd-length
+            // chunk (write() emits exactly one such byte). Anything else
+            // here - more than one leftover byte, or a non-zero byte - is
+            // not standard padding and likely indicates truncated/corrupted
+            // data, so it must not be silently accepted.
+            if (bytes.len - pos == 1 and bytes[pos] == 0) {
+                break;
+            }
+            return error.InvalidFormat;
+        }
+
+        const id = bytes[pos .. pos + 4][0..4];
+        const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
+
+        // Detect overflow explicitly rather than just widening to usize:
+        // on a 32-bit target `usize` is `u32`, so there is no wider type to
+        // widen into, and `pos + 8 + size` can still overflow-panic for a
+        // `size` near `maxInt(u32)`. std.math.add reports the overflow as
+        // an error instead of panicking, on every target.
+        const header_end = std.math.add(usize, pos, 8) catch return error.SizeMismatch;
+        const next_pos = std.math.add(usize, header_end, size) catch return error.SizeMismatch;
+
+        if (next_pos > bytes.len) return error.SizeMismatch;
+
+        // A nested "RIFF" is handled identically to "LIST": both are just a
+        // container header (id + size + type FourCC) followed by sub-chunks.
+        // write() already serializes a nested `.riff` this way, so read() must
+        // recognize it too, or the nested chunk round-trips back as an opaque
+        // `.chunk` leaf instead of its original `.riff` structure.
+        if (std.mem.eql(u8, id, "LIST") or std.mem.eql(u8, id, "RIFF")) {
+            if (next_pos < pos + 12) return error.InvalidFormat;
+            const container_type = bytes[pos + 8 .. pos + 12][0..4];
+            const sub_chunks = try referenceToChunkList(allocator, bytes[pos + 12 .. next_pos], depth + 1);
+            errdefer {
+                for (sub_chunks) |c| c.deinit(allocator);
+                allocator.free(sub_chunks);
+            }
+            const four_cc = try FourCC.new(container_type);
+            try list.append(allocator, if (std.mem.eql(u8, id, "LIST"))
+                Chunk{ .list = .{ .four_cc = four_cc, .chunks = sub_chunks } }
+            else
+                Chunk{ .riff = .{ .four_cc = four_cc, .chunks = sub_chunks } });
+        } else {
+            const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
+            errdefer allocator.free(chunk_data);
+            try list.append(allocator, Chunk{ .chunk = .{
+                .four_cc = try FourCC.new(id),
+                .data = chunk_data,
+            } });
+        }
+
+        // RIFF chunks are padded to an even byte boundary: `write()` emits a
+        // pad byte after odd-length data, but that pad byte is not counted in
+        // `size`, so it must be skipped here before parsing the next sibling.
+        pos = next_pos + (size % 2);
+    }
+
+    return list.toOwnedSlice(allocator);
+}
+
 fn expectSameTree(a: Chunk, b: Chunk) !void {
     try testing.expectEqual(std.meta.activeTag(a), std.meta.activeTag(b));
     switch (a) {
@@ -381,7 +507,7 @@ fn expectReadTreeMatches(expected: Chunk, bytes: []const u8, buffer: ?[]u8, opti
     const a = testing.allocator;
     var src: std.Io.Reader = .fixed(bytes);
     // With a buffer, wrap in a reader whose own buffer is that small, as a
-    // small-buffer file reader would be. read() cannot handle this.
+    // small-buffer file reader would be. The reference parser cannot handle this.
     var no_buffer: [0]u8 = .{};
     var small = src.limited(.unlimited, buffer orelse &no_buffer);
     const reader = if (buffer != null) &small.interface else &src;
@@ -390,12 +516,12 @@ fn expectReadTreeMatches(expected: Chunk, bytes: []const u8, buffer: ?[]u8, opti
     try expectSameTree(expected, got);
 }
 
-test "stream: readTree == read() on every sample, whole buffer and 4 KiB streaming buffer" {
+test "stream: readTree == reference parser on every sample, whole buffer and 4 KiB streaming buffer" {
     const a = testing.allocator;
     var buf: [4096]u8 = undefined;
     for (samples) |bytes| {
         var r_old: std.Io.Reader = .fixed(bytes);
-        const old = try riff.read(a, &r_old);
+        const old = try referenceRead(a, &r_old);
         defer old.deinit(a);
 
         const sized: Options = .{ .total_len = bytes.len };
@@ -440,12 +566,12 @@ test "stream: skip everything but one chunk, streamed in 256-byte pieces" {
     try testing.expectEqual(std.hash.Wyhash.hash(0, expected), hasher.final());
 }
 
-// Differential check on corrupted inputs: read() and readTree() must agree on
-// success vs failure (and on the tree when both succeed). With
+// Differential check on corrupted inputs: the reference parser and readTree()
+// must agree on success vs failure (and on the tree when both succeed). With
 // `Options.total_len` the error kind must match too; without it, it may
-// differ, since read() checks the top-level size before the children and a
-// stream of unknown length cannot.
-test "stream: differential against read() on mutated/truncated samples" {
+// differ, since the reference parser checks the top-level size before the
+// children and a stream of unknown length cannot.
+test "stream: differential against the reference parser on mutated/truncated samples" {
     const a = testing.allocator;
     var prng = std.Random.DefaultPrng.init(0x5eed);
     const rand = prng.random();
@@ -468,7 +594,7 @@ test "stream: differential against read() on mutated/truncated samples" {
             const input = buf[0..len];
 
             var r1: std.Io.Reader = .fixed(input);
-            const old = riff.read(a, &r1);
+            const old = referenceRead(a, &r1);
             defer if (old) |c| c.deinit(a) else |_| {};
 
             for ([_]?u64{ null, input.len }) |total_len| {
@@ -481,16 +607,16 @@ test "stream: differential against read() on mutated/truncated samples" {
 
                 if (old) |o| {
                     const nn = new catch |e| {
-                        std.debug.print("read() ok, readTree(total_len={?d}) {t}: {x}\n", .{ total_len, e, input });
+                        std.debug.print("reference ok, readTree(total_len={?d}) {t}: {x}\n", .{ total_len, e, input });
                         return error.TestUnexpectedResult;
                     };
                     try expectSameTree(o, nn);
                 } else |eo| {
                     if (new) |_| {
-                        std.debug.print("read() {t}, readTree(total_len={?d}) ok: {x}\n", .{ eo, total_len, input });
+                        std.debug.print("reference {t}, readTree(total_len={?d}) ok: {x}\n", .{ eo, total_len, input });
                         return error.TestUnexpectedResult;
                     } else |en| if (total_len != null and eo != en) {
-                        std.debug.print("read() {t}, readTree(total_len={?d}) {t}: {x}\n", .{ eo, total_len, en, input });
+                        std.debug.print("reference {t}, readTree(total_len={?d}) {t}: {x}\n", .{ eo, total_len, en, input });
                         return error.TestUnexpectedResult;
                     }
                 }

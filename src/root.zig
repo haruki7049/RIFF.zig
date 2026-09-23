@@ -45,13 +45,13 @@
 //!     try riff.write(wave_chunk, allocator, &file_writer.interface);
 //!     try file_writer.interface.flush();
 //!
-//!     // Parse from file. read() only inspects reader.buffered() (see
-//!     // "Buffering Requirement" on `read`), so load the whole file up
-//!     // front and wrap it with a fixed reader rather than streaming it.
-//!     const data = try std.Io.Dir.cwd().readFileAlloc(io, "input.wav", allocator, .unlimited);
-//!     defer allocator.free(data);
-//!     var reader = std.Io.Reader.fixed(data);
-//!     const parsed = try riff.read(allocator, &reader);
+//!     // Parse from file. read() pulls bytes from the reader as it goes, so a
+//!     // small-buffered file reader works: no need to load the whole file first.
+//!     const in_file = try std.Io.Dir.cwd().openFile(io, "input.wav", .{});
+//!     defer in_file.close(io);
+//!     var in_buffer: [4096]u8 = undefined;
+//!     var file_reader = in_file.reader(io, &in_buffer);
+//!     const parsed = try riff.read(allocator, &file_reader.interface);
 //!     defer parsed.deinit(allocator);
 //! }
 //! ```
@@ -64,7 +64,8 @@
 
 const std = @import("std");
 
-/// PROTOTYPE: streaming parser. See `stream.zig`.
+/// Pull-style streaming parser (`stream.Iterator`), and the tree builder
+/// `read()` is implemented with (`stream.readTree`). See `stream.zig`.
 pub const stream = @import("stream.zig");
 
 test {
@@ -178,7 +179,7 @@ pub const Chunk = union(enum) {
     }
 };
 
-/// Maximum nesting depth of RIFF/LIST containers that `read()`/`to_chunk_list`
+/// Maximum nesting depth of RIFF/LIST containers that `read()`
 /// will descend into, and that `write()` will serialize. Guards against a
 /// stack-overflow crash from adversarial input with many trivially nested
 /// LIST chunks (each level costs only 12 bytes: "LIST" + size + type
@@ -201,7 +202,10 @@ pub const ToChunkListError = error{
 };
 
 /// Error type returned by `read()`.
-pub const ReadError = ToChunkListError || std.mem.Allocator.Error || FourCC.NewError;
+pub const ReadError = ToChunkListError || std.mem.Allocator.Error || FourCC.NewError || error{
+    /// The underlying reader failed (an I/O error, not a problem with the RIFF data).
+    ReadFailed,
+};
 
 /// Error type returned by `write()`.
 pub const WriteError = std.Io.Writer.Error || error{
@@ -268,7 +272,7 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 
 /// `write()`'s actual implementation, with the nesting-depth counter that
 /// `write()`'s public signature has no room for. Bounded by
-/// `max_nesting_depth` the same way `to_chunk_list()` bounds `read()`: a
+/// `max_nesting_depth` the same way the streaming parser bounds `read()`: a
 /// `Chunk` tree passed to `write()` isn't required to have come from
 /// `read()`, so nothing else stops a deeply nested tree built some other way
 /// from overflowing the stack here.
@@ -332,7 +336,7 @@ fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
 /// to the real writer instead of buffering them first.
 ///
 /// `depth` is `chunk`'s own nesting level, bounded by `max_nesting_depth`
-/// the same way `to_chunk_list()` bounds `read()` - this is mutually
+/// the same way the streaming parser bounds `read()` - this is mutually
 /// recursive with `container_children_size()`, so without a bound a deeply
 /// nested `Chunk` tree could overflow the stack here just as it could in
 /// `writeChunk()`.
@@ -363,11 +367,13 @@ fn container_children_size(chunks: []const Chunk, depth: usize) error{ PayloadTo
     return std.math.cast(u32, total) orelse error.PayloadTooLarge;
 }
 
-/// Parses a RIFF chunk from a reader containing binary RIFF data.
+/// Parses a RIFF chunk tree from a reader.
 ///
-/// This function reads binary data from the reader and constructs a `Chunk` structure
-/// representing the parsed RIFF data. The function automatically detects the chunk type
-/// based on the FourCC identifier and handles parsing accordingly.
+/// This function pulls bytes from `reader` as it goes and constructs a `Chunk`
+/// structure representing the parsed RIFF data. It is built on `stream.Iterator`
+/// (see `stream.readTree`), so `reader` needs no particular buffer size: a file
+/// reader with a small buffer works, and the whole input never has to be loaded
+/// into memory first.
 ///
 /// ## Supported Chunk Types
 ///
@@ -375,185 +381,53 @@ fn container_children_size(chunks: []const Chunk, depth: usize) error{ PayloadTo
 ///   The function expects at least 12 bytes: "RIFF" (4) + size (4) + type FourCC (4).
 ///
 /// - **LIST chunks**: Container chunks that hold multiple sub-chunks.
-///   The function expects at least 8 bytes: "LIST" (4) + size (4), followed by sub-chunks.
+///   The function expects at least 12 bytes: "LIST" (4) + size (4) + type FourCC (4).
 ///
 /// - **Basic chunks**: Leaf chunks with a FourCC identifier and data payload.
 ///   The function expects at least 8 bytes: FourCC (4) + size (4), followed by data.
 ///
-/// ## Buffering Requirement
-///
-/// `read()` only inspects whatever bytes are already available via `reader.buffered()`;
-/// it never calls `fill`/`discard` or otherwise pulls more bytes from the underlying
-/// source. This means `reader` must already have the *entire* chunk (including all
-/// nested sub-chunks) sitting in its buffer before calling `read()`. A genuinely
-/// streaming reader whose buffer is smaller than the data being parsed will fail with
-/// `error.InvalidFormat` or `error.SizeMismatch` on otherwise valid RIFF data.
-///
-/// In practice this means reading the whole input into memory first and wrapping it
-/// with `std.Io.Reader.fixed(data)`, as shown in the module-level usage example, rather
-/// than passing a small-buffer streaming reader (e.g. a file reader with a small
-/// internal buffer) directly.
-///
 /// ## Memory Allocation
 ///
 /// The function allocates memory for:
-/// - Chunk data payloads (copied from the reader buffer)
+/// - Chunk data payloads (copied from the reader)
 /// - Arrays of sub-chunks for LIST and RIFF containers
 ///
 /// All allocated memory must be freed by calling `chunk.deinit(allocator)` when done.
+/// Nothing is allocated for a chunk's payload before its bytes have started to
+/// arrive, so a tiny input that merely *claims* a huge chunk fails without a
+/// huge allocation.
 ///
 /// ## Data Format
 ///
-/// The reader must provide a buffer with the complete chunk data in little-endian format:
+/// The reader must provide the complete chunk data in little-endian format:
 /// - FourCC identifiers are 4-byte ASCII sequences
 /// - Size fields are 32-bit little-endian unsigned integers
 /// - Data follows immediately after the size field
 ///
+/// ## Input Length
+///
+/// `read()` cannot know how many bytes the input holds. For a truncated input
+/// whose declared size exceeds what is actually there, the reported error can
+/// therefore depend on where the truncation falls (e.g. `InvalidFormat` instead
+/// of `SizeMismatch` when it lands inside a nested chunk header). If you know the
+/// input's length (a file's size, a fixed buffer's length), call
+/// `stream.readTree()` with `Options.total_len` instead: the declared size is
+/// then checked against it up front.
+///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
-///   - `reader`: The `std.Io.Reader` to read RIFF chunk binary data from. Its buffer must
-///     already contain the entire chunk being parsed; see "Buffering Requirement" below.
+///   - `reader`: The `std.Io.Reader` to read RIFF chunk binary data from.
 ///
 /// Returns: A `Chunk` instance representing the parsed data. The caller owns the memory and must call `deinit()`.
 ///
 /// Errors: see `ReadError`.
 ///   - `InvalidFormat`: If a chunk header is incomplete or malformed.
-///   - `SizeMismatch`: If a chunk's declared size extends beyond the available buffered data.
+///   - `SizeMismatch`: If a chunk's declared size extends beyond the available data.
 ///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
+///   - `ReadFailed`: If the underlying reader fails.
 ///   - `OutOfMemory`: If allocating a chunk's data payload or a sub-chunk array fails.
 pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chunk {
-    // A chunk header is a FourCC (4 bytes) followed by a little-endian u32 size (4 bytes).
-    const four_cc_len = 4;
-    const header_len = four_cc_len + @sizeOf(u32);
-    // RIFF/LIST containers have an extra type FourCC right after the header.
-    const container_header_len = header_len + four_cc_len;
-
-    const buffer = reader.buffered();
-
-    if (buffer.len < header_len)
-        return error.InvalidFormat;
-
-    const id = buffer[0..four_cc_len];
-    const size = std.mem.readInt(u32, buffer[four_cc_len..header_len], .little);
-
-    const is_riff = std.mem.eql(u8, id, "RIFF");
-    const is_list = std.mem.eql(u8, id, "LIST");
-    if (is_riff or is_list) {
-        if (buffer.len < container_header_len or size < four_cc_len)
-            return error.InvalidFormat;
-
-        // Widen to usize before adding: `header_len` is a comptime_int with no
-        // usize operand in this expression, so `header_len + size` would stay
-        // u32-typed and overflow-panic for `size` near `maxInt(u32)`.
-        const data_end: usize = header_len + @as(usize, size);
-        if (buffer.len < data_end)
-            return error.SizeMismatch;
-
-        const four_cc = buffer[header_len..container_header_len];
-        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end], 0);
-        const container: Container = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks };
-        return if (is_riff) Chunk{ .riff = container } else Chunk{ .list = container };
-    } else {
-        const data_end: usize = header_len + @as(usize, size);
-
-        if (buffer.len < data_end)
-            return error.SizeMismatch;
-
-        const data = try allocator.dupe(u8, buffer[header_len..data_end]);
-        return Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = data } };
-    }
-}
-
-/// Internal helper function to parse a sequence of chunks from binary data.
-/// Used by `read` to parse the contents of LIST and RIFF chunks.
-///
-/// Parameters:
-///   - `allocator`: Memory allocator for creating chunk structures.
-///   - `bytes`: The raw binary data containing one or more sequential chunks.
-///   - `depth`: Current nesting depth (0 for the children of the top-level
-///     RIFF/LIST chunk `read()` parsed). Checked against `max_nesting_depth`
-///     before descending into a nested LIST chunk, to bound recursion.
-///
-/// Returns: A slice of parsed `Chunk` instances.
-///
-/// Errors:
-///   - `InvalidFormat`: If any chunk header is incomplete (from `ToChunkListError` or `FourCC.NewError`).
-///   - `SizeMismatch`: If any chunk size extends beyond available data (from `ToChunkListError`).
-///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
-///   - `OutOfMemory`: If memory allocation fails during parsing (from `std.mem.Allocator.Error`).
-fn to_chunk_list(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) (ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
-    if (depth > max_nesting_depth)
-        return error.NestingTooDeep;
-
-    var list: std.array_list.Aligned(Chunk, null) = .empty;
-    errdefer {
-        for (list.items) |c| c.deinit(allocator);
-        list.deinit(allocator);
-    }
-
-    var pos: usize = 0;
-    while (pos < bytes.len) {
-        // Need at least 8 bytes for chunk header (FourCC + size)
-        if (pos + 8 > bytes.len) {
-            // The RIFF spec only pads a chunk with a single zero byte, to
-            // keep the container's overall size even, after an odd-length
-            // chunk (write() emits exactly one such byte). Anything else
-            // here - more than one leftover byte, or a non-zero byte - is
-            // not standard padding and likely indicates truncated/corrupted
-            // data, so it must not be silently accepted.
-            if (bytes.len - pos == 1 and bytes[pos] == 0) {
-                break;
-            }
-            return error.InvalidFormat;
-        }
-
-        const id = bytes[pos .. pos + 4][0..4];
-        const size = std.mem.readInt(u32, bytes[pos + 4 .. pos + 8][0..4], .little);
-
-        // Detect overflow explicitly rather than just widening to usize:
-        // on a 32-bit target `usize` is `u32`, so there is no wider type to
-        // widen into, and `pos + 8 + size` can still overflow-panic for a
-        // `size` near `maxInt(u32)`. std.math.add reports the overflow as
-        // an error instead of panicking, on every target.
-        const header_end = std.math.add(usize, pos, 8) catch return error.SizeMismatch;
-        const next_pos = std.math.add(usize, header_end, size) catch return error.SizeMismatch;
-
-        if (next_pos > bytes.len) return error.SizeMismatch;
-
-        // A nested "RIFF" is handled identically to "LIST": both are just a
-        // container header (id + size + type FourCC) followed by sub-chunks.
-        // write() already serializes a nested `.riff` this way, so read() must
-        // recognize it too, or the nested chunk round-trips back as an opaque
-        // `.chunk` leaf instead of its original `.riff` structure.
-        if (std.mem.eql(u8, id, "LIST") or std.mem.eql(u8, id, "RIFF")) {
-            if (next_pos < pos + 12) return error.InvalidFormat;
-            const container_type = bytes[pos + 8 .. pos + 12][0..4];
-            const sub_chunks = try to_chunk_list(allocator, bytes[pos + 12 .. next_pos], depth + 1);
-            errdefer {
-                for (sub_chunks) |c| c.deinit(allocator);
-                allocator.free(sub_chunks);
-            }
-            const four_cc = try FourCC.new(container_type);
-            try list.append(allocator, if (std.mem.eql(u8, id, "LIST"))
-                Chunk{ .list = .{ .four_cc = four_cc, .chunks = sub_chunks } }
-            else
-                Chunk{ .riff = .{ .four_cc = four_cc, .chunks = sub_chunks } });
-        } else {
-            const chunk_data = try allocator.dupe(u8, bytes[pos + 8 .. next_pos]);
-            errdefer allocator.free(chunk_data);
-            try list.append(allocator, Chunk{ .chunk = .{
-                .four_cc = try FourCC.new(id),
-                .data = chunk_data,
-            } });
-        }
-
-        // RIFF chunks are padded to an even byte boundary: `write()` emits a
-        // pad byte after odd-length data, but that pad byte is not counted in
-        // `size`, so it must be skipped here before parsing the next sibling.
-        pos = next_pos + (size % 2);
-    }
-
-    return list.toOwnedSlice(allocator);
+    return stream.readTree(allocator, reader, .{});
 }
 
 test "Wave" {
@@ -630,7 +504,7 @@ test "write returns NestingTooDeep instead of overflowing the stack for excessiv
 
     // Regression test: write()/serialized_size()/container_children_size()
     // used to recurse once per nested .list/.riff level with no depth
-    // limit, unlike read()/to_chunk_list(). Nothing requires a Chunk tree
+    // limit, unlike read(). Nothing requires a Chunk tree
     // passed to write() to have come from read() (which is already
     // bounded), so a tree built some other way - e.g. programmatically, as
     // here - could overflow the stack. Build a chain nested one level
@@ -742,7 +616,7 @@ test "a nested .riff chunk round-trips instead of losing its structure" {
     const allocator = std.testing.allocator;
 
     // Regression test: write() already serializes a nested `.riff` chunk
-    // (nothing restricts `.riff` to the top level), but to_chunk_list() used
+    // (nothing restricts `.riff` to the top level), but read() used
     // to only special-case "LIST", so a nested "RIFF" id fell through to the
     // generic leaf branch and came back as an opaque `.chunk` with undecoded
     // bytes instead of its original `.riff` structure.
@@ -912,7 +786,7 @@ test "read returns InvalidFormat for a nested RIFF/LIST without room for its typ
     inline for (.{ "LIST", "RIFF" }) |nested_id| {
         // Nested container declares a 2-byte payload, leaving no room for
         // its own 4-byte type FourCC. Since #46, a nested "RIFF" hits the
-        // identical check as "LIST" in to_chunk_list().
+        // identical check as "LIST".
         const nested = nested_id ++ "\x02\x00\x00\x00" ++ "XY";
         const buffer = "RIFF" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ nested;
 
@@ -924,14 +798,14 @@ test "read returns InvalidFormat for a nested RIFF/LIST without room for its typ
 test "read returns NestingTooDeep instead of overflowing the stack for excessively nested RIFF/LIST chunks" {
     const allocator = std.testing.allocator;
 
-    // Regression test: to_chunk_list() used to recurse once per nested
+    // Regression test: read() used to recurse once per nested
     // LIST/RIFF chunk with no depth limit, so adversarial input with many
     // trivially nested containers (12 bytes of overhead each) could
     // overflow the call stack before any error was returned. Build a chain
     // nested one level deeper than max_nesting_depth and confirm read()
     // reports NestingTooDeep instead of crashing - for a chain nested (and
     // entered at the top level) via "LIST" and, separately, via "RIFF",
-    // since #46 made to_chunk_list() treat nested "RIFF" identically to
+    // since #46 made read() treat nested "RIFF" identically to
     // "LIST".
     inline for (.{ "LIST", "RIFF" }) |id| {
         // Innermost leaf: a plain chunk with no payload.
@@ -963,11 +837,11 @@ test "read returns NestingTooDeep instead of overflowing the stack for excessive
     }
 }
 
-test "to_chunk_list does not leak a chunk's data if appending it to the list fails" {
+test "read does not leak a chunk's data if appending it to the list fails" {
     // Regression test: if allocator.dupe() for a leaf chunk's data succeeded
     // but the subsequent list.append() then failed (e.g. array growth OOM),
     // the duplicated data was never freed - it wasn't yet part of list.items,
-    // so to_chunk_list's own errdefer (which frees already-appended chunks)
+    // so the parser's own errdefer (which frees already-appended chunks)
     // never reached it. Sweep a few failure points instead of hardcoding the
     // exact internal allocation count, and rely on std.testing.allocator's
     // own leak detector to fail this test if anything goes unfreed.
@@ -988,14 +862,14 @@ test "to_chunk_list does not leak a chunk's data if appending it to the list fai
 test "read accepts exactly one trailing zero pad byte inside a container but rejects more" {
     const allocator = std.testing.allocator;
 
-    // Regression test: to_chunk_list() used to tolerate up to 7 trailing zero
+    // Regression test: read() used to tolerate up to 7 trailing zero
     // bytes after the last chunk in a container as "padding", with no basis
     // in the RIFF spec (only a single pad byte, to keep the overall size
     // even, is ever standard). That could mask truncated/corrupted data as
     // valid. A single trailing zero byte must still be accepted; anything
     // beyond that must be rejected as InvalidFormat. Checked for both a
     // "RIFF"- and a "LIST"-wrapped container, since both share the same
-    // to_chunk_list() check.
+    // check.
     const child = "data" ++ "\x02\x00\x00\x00" ++ "AB"; // even-sized, no pad needed
 
     inline for (.{ "RIFF", "LIST" }) |id| {
