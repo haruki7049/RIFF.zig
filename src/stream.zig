@@ -20,10 +20,10 @@ pub const Error = riff.ToChunkListError || FourCC.NewError || error{
 };
 
 /// Errors of `Iterator.data()`, which borrows from the reader's buffer.
-pub const DataError = Error || error{
+pub const DataError = Error || BorrowError || error{
     /// `data()` was called on a chunk larger than the reader's buffer.
     BufferTooSmall,
-} || BorrowError;
+};
 
 /// Errors of `Iterator.data()`/`Iterator.dataReader()` relating to reentrancy.
 pub const BorrowError = error{
