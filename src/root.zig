@@ -476,7 +476,7 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 /// Errors: see `ReadError`.
 ///   - `InvalidFormat`: If a chunk header is incomplete or malformed.
 ///   - `SizeMismatch`: If a chunk's declared size extends beyond the available data.
-///   - `NestingTooDeep`: If nested LIST containers exceed `max_nesting_depth`.
+///   - `NestingTooDeep`: If `.list`/`.riff` nesting exceeds `max_nesting_depth`.
 ///   - `ReadFailed`: If the underlying reader fails.
 ///   - `OutOfMemory`: If allocating a chunk's data payload or a sub-chunk array fails.
 pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chunk {
