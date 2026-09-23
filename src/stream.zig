@@ -103,7 +103,8 @@ pub const Iterator = struct {
     state: enum { start, running, done } = .start,
     /// Set by the first error `next()` returns, or by a failed read while
     /// fetching a payload. The stream position is unreliable after such an
-    /// error, so every later `next()` returns the same error.
+    /// error, so every later `next()`, `data()`, `readDataAlloc()` and
+    /// `dataReader()` returns the same error.
     failed: ?Error = null,
     /// True from a `.chunk` event until its payload is taken (`data()`,
     /// `readDataAlloc()`, `dataReader()`) or the next `next()` call.
@@ -117,8 +118,9 @@ pub const Iterator = struct {
     ///
     /// After an error, every further call returns that same error instead of
     /// continuing from an unreliable position (or reporting a clean end of
-    /// stream). Payload access errors (`BufferTooSmall`, `AlreadyBorrowed`,
-    /// `NoPayload`) consume nothing and are not sticky.
+    /// stream); so do `data()`, `readDataAlloc()` and `dataReader()`. Payload
+    /// access errors (`BufferTooSmall`, `AlreadyBorrowed`, `NoPayload`)
+    /// consume nothing and are not sticky.
     pub fn next(it: *Iterator) Error!?Event {
         if (it.failed) |e| return e;
         return it.nextEvent() catch |e| return it.fail(e);
@@ -198,6 +200,7 @@ pub const Iterator = struct {
     /// Returns `error.NoPayload` unless the last event was a `.chunk` whose
     /// payload has not been taken yet: the payload can be fetched only once.
     pub fn data(it: *Iterator) DataError![]const u8 {
+        if (it.failed) |e| return e;
         if (it.limited != null) return error.AlreadyBorrowed;
         if (!it.payload_ready) return error.NoPayload;
         const n: usize = @intCast(it.pending);
@@ -231,6 +234,7 @@ pub const Iterator = struct {
     /// `error.NoPayload` unless the last event was a `.chunk` whose payload
     /// has not been taken yet.
     pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || AccessError || std.mem.Allocator.Error)![]u8 {
+        if (it.failed) |e| return e;
         if (it.limited != null) return error.AlreadyBorrowed;
         if (!it.payload_ready) return error.NoPayload;
         const n: usize = @intCast(it.pending);
@@ -272,7 +276,8 @@ pub const Iterator = struct {
     ///
     /// Returns `error.NoPayload` unless the last event was a `.chunk` whose
     /// payload has not been taken yet.
-    pub fn dataReader(it: *Iterator, buffer: []u8) AccessError!*std.Io.Reader {
+    pub fn dataReader(it: *Iterator, buffer: []u8) (Error || AccessError)!*std.Io.Reader {
+        if (it.failed) |e| return e;
         if (it.limited != null) return error.AlreadyBorrowed;
         if (!it.payload_ready) return error.NoPayload;
         it.payload_ready = false;
@@ -947,6 +952,25 @@ test "stream: next() keeps returning the same error after a mid-stream failure" 
 
     try testing.expectEqual(Kind.riff, (try it.next()).?.begin_container.kind);
     try testing.expectError(error.SizeMismatch, it.next());
+    try testing.expectError(error.SizeMismatch, it.next());
+}
+
+test "stream: payload accessors keep returning the error after a failed payload read" {
+    // Regression test: data()/readDataAlloc()/dataReader() did not look at the
+    // sticky error, and a failed read left the payload marked available, so
+    // dataReader() then handed out a reader over a misaligned position.
+    // The chunk declares 16 bytes but only 2 are present.
+    const buffer = "abcd" ++ "\x10\x00\x00\x00" ++ "xy";
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+    _ = (try it.next()).?;
+
+    try testing.expectError(error.SizeMismatch, it.readDataAlloc(testing.allocator));
+
+    var piece: [4]u8 = undefined;
+    try testing.expectError(error.SizeMismatch, it.data());
+    try testing.expectError(error.SizeMismatch, it.readDataAlloc(testing.allocator));
+    try testing.expectError(error.SizeMismatch, it.dataReader(&piece));
     try testing.expectError(error.SizeMismatch, it.next());
 }
 
