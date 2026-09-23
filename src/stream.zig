@@ -219,6 +219,13 @@ pub const Iterator = struct {
     /// than it really contained. With `total_len`, the size was already
     /// checked against it, so the payload is allocated in one piece.
     ///
+    /// If an allocation fails before any of the payload was read, the payload
+    /// is still available and the call can be retried. If it fails after part
+    /// of it was read (the growing case above), `error.OutOfMemory` is
+    /// returned, the part read is discarded and the payload cannot be fetched
+    /// again (`error.NoPayload`), but the iterator stays in sync: `next()`
+    /// continues with the event after this chunk.
+    ///
     /// Returns `error.AlreadyBorrowed` if a `dataReader()` sub-reader is
     /// still open, like `data()` and `dataReader()` do, and
     /// `error.NoPayload` unless the last event was a `.chunk` whose payload
@@ -238,14 +245,20 @@ pub const Iterator = struct {
         }
 
         var list: std.ArrayList(u8) = .empty;
-        errdefer list.deinit(allocator);
+        // A failure after part of the payload was read discards that part, so
+        // the payload can no longer be fetched; `pending` is kept exact below,
+        // so the iterator itself stays in sync.
+        errdefer {
+            if (list.items.len > 0) it.payload_ready = false;
+            list.deinit(allocator);
+        }
         while (list.items.len < n) {
             const step = @min(n - list.items.len, alloc_step);
             try list.ensureUnusedCapacity(allocator, step);
             try it.readExact(list.unusedCapacitySlice()[0..step]);
+            it.pending -= step;
             list.items.len += step;
         }
-        it.pending = 0;
         it.payload_ready = false;
         return list.toOwnedSlice(allocator);
     }
@@ -746,6 +759,92 @@ test "stream: readTree never leaks on allocation failure" {
             c.deinit(a);
         }
     }.f, .{@as([]const u8, @embedFile("assets/riff-files/riff_chunk_has_list.riff"))});
+}
+
+// A RIFF holding a `payload_len`-byte "data" chunk followed by a small "tail"
+// chunk. Read through a tiny buffer without Options.total_len, the payload is
+// not buffered, so readDataAlloc() takes the growing path.
+fn growingInput(a: std.mem.Allocator, payload_len: usize) ![]u8 {
+    std.debug.assert(payload_len % 2 == 0);
+    const tail = "tail" ++ "\x02\x00\x00\x00" ++ "ok";
+    const buf = try a.alloc(u8, 12 + 8 + payload_len + tail.len);
+    @memcpy(buf[0..4], "RIFF");
+    std.mem.writeInt(u32, buf[4..8], @intCast(4 + 8 + payload_len + tail.len), .little);
+    @memcpy(buf[8..12], "TEST");
+    @memcpy(buf[12..16], "data");
+    std.mem.writeInt(u32, buf[16..20], @intCast(payload_len), .little);
+    for (buf[20..][0..payload_len], 0..) |*b, i| b.* = @truncate(i);
+    @memcpy(buf[20 + payload_len ..], tail);
+    return buf;
+}
+
+test "stream: readDataAlloc() out of memory after part of the payload was read keeps the iterator in sync" {
+    // Regression test: each growth step advanced `pos` but `pending` and
+    // `payload_ready` were only updated after the loop, so an OutOfMemory on a
+    // later step left the iterator believing nothing had been read. next()
+    // then skipped the whole payload again and reported SizeMismatch on valid
+    // input.
+    const a = testing.allocator;
+    const input = try growingInput(a, 2 * alloc_step + 10);
+    defer a.free(input);
+
+    var src: std.Io.Reader = .fixed(input);
+    var tiny: [16]u8 = undefined;
+    var lim = src.limited(.unlimited, &tiny);
+    var it = Iterator.init(&lim.interface, .{});
+    _ = (try it.next()).?;
+    _ = (try it.next()).?;
+
+    var failing = testing.FailingAllocator.init(a, .{ .fail_index = 1, .resize_fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, it.readDataAlloc(failing.allocator()));
+
+    // The part that was read is gone, so the payload cannot be fetched again...
+    try testing.expectError(error.NoPayload, it.readDataAlloc(a));
+    // ...but the iterator continues correctly with the next chunk.
+    const tail = (try it.next()).?;
+    try testing.expectEqualStrings("tail", &tail.chunk.four_cc.inner);
+    const got = try it.readDataAlloc(a);
+    defer a.free(got);
+    try testing.expectEqualStrings("ok", got);
+}
+
+test "stream: readDataAlloc() out of memory before any of the payload was read can be retried" {
+    const a = testing.allocator;
+    const input = try growingInput(a, 2 * alloc_step + 10);
+    defer a.free(input);
+
+    var src: std.Io.Reader = .fixed(input);
+    var tiny: [16]u8 = undefined;
+    var lim = src.limited(.unlimited, &tiny);
+    var it = Iterator.init(&lim.interface, .{});
+    _ = (try it.next()).?;
+    _ = (try it.next()).?;
+
+    var failing = testing.FailingAllocator.init(a, .{ .fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, it.readDataAlloc(failing.allocator()));
+
+    const got = try it.readDataAlloc(a);
+    defer a.free(got);
+    try testing.expectEqual(2 * alloc_step + 10, got.len);
+    try testing.expectEqual(@as(u8, @truncate(alloc_step + 7)), got[alloc_step + 7]);
+}
+
+test "stream: readTree never leaks on allocation failure in the growing payload path" {
+    // The test above passes total_len, which allocates each payload in one
+    // piece. Without it, and with a tiny reader buffer, readDataAlloc() grows
+    // its allocation as bytes arrive; cover that path too.
+    const input = try growingInput(testing.allocator, 2 * alloc_step + 10);
+    defer testing.allocator.free(input);
+
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn f(a: std.mem.Allocator, b: []const u8) !void {
+            var src: std.Io.Reader = .fixed(b);
+            var tiny: [16]u8 = undefined;
+            var lim = src.limited(.unlimited, &tiny);
+            const c = try readTree(a, &lim.interface, .{});
+            c.deinit(a);
+        }
+    }.f, .{@as([]const u8, input)});
 }
 
 test "stream: data() returns BufferTooSmall when the chunk is larger than the reader's buffer" {
