@@ -15,7 +15,7 @@ nix develop
 zig build test
 ```
 
-You can also install Zig yourself. In that case you also need [treefmt](https://github.com/numtide/treefmt) to check the formatting (see "Checks before you submit").
+You can also install Zig yourself and work without Nix. Note that `treefmt`, the tool that checks and fixes the formatting, is provided only by the Nix environment (`nix develop`). Without Nix it is not available: format the Zig files you changed with `zig fmt`, and the CI will check the formatting of all files (it runs `nix flake check --all-systems`, which includes a formatting check).
 
 ### Zig version
 
@@ -39,13 +39,13 @@ Run these commands and make sure they pass:
 
 | Command | When |
 | --- | --- |
-| `treefmt --fail-on-change` | Always. It checks the formatting of Zig, Nix, GitHub Actions, and Markdown files. Run `treefmt` to fix the formatting. |
+| `treefmt --fail-on-change` | Always, inside `nix develop` (it is not available without Nix; see "Environment"). It checks the formatting of Zig, Nix, GitHub Actions, and Markdown files. Run `treefmt` to fix the formatting. |
 | `zig build` | Always. |
 | `zig build test` | Always. |
 | `zig build docs` | When you change the public API or a doc comment. |
 | `nix flake check --all-systems` | When you change `flake.nix` or `flake.lock`. |
 
-The library also supports 32-bit targets. To check that the tests build for one, run:
+32-bit targets are not a main target of this library, but it is meant to work there too, on a best-effort basis. You do not have to check it for every change. If you want to, this command checks that the tests build for a 32-bit target:
 
 ```bash
 zig test src/root.zig -target x86-linux --test-no-exec
