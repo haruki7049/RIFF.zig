@@ -443,13 +443,15 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 ///
 /// ## Input Length
 ///
-/// `read()` cannot know how many bytes the input holds. For a truncated input
-/// whose declared size exceeds what is actually there, the reported error can
-/// therefore depend on where the truncation falls (e.g. `InvalidFormat` instead
-/// of `SizeMismatch` when it lands inside a nested chunk header). If you know the
-/// input's length (a file's size, a fixed buffer's length), call
-/// `stream.readTree()` with `Options.total_len` instead: the declared size is
-/// then checked against it up front.
+/// `read()` cannot know how many bytes the input holds. A truncated input is
+/// reported as `InvalidFormat` if it ends inside the top-level chunk's header
+/// (8 bytes for a leaf chunk, 12 for a RIFF/LIST container, whose header
+/// includes the type FourCC), and as `SizeMismatch` if it ends anywhere after
+/// that, including inside a nested chunk header. If you know the input's length
+/// (a file's size, a fixed buffer's length), call `stream.readTree()` with
+/// `Options.total_len` instead: the same errors are reported, but a declared
+/// size larger than the input is rejected before anything is read, and each
+/// payload is allocated in one piece.
 ///
 /// ## Padding
 ///
@@ -918,6 +920,31 @@ test "read returns SizeMismatch when the declared size exceeds the remaining buf
     const buffer = "data" ++ "\x0a\x00\x00\x00" ++ "AB";
     var reader = std.Io.Reader.fixed(buffer);
     try std.testing.expectError(error.SizeMismatch, read(allocator, &reader));
+}
+
+test "a truncated input is InvalidFormat inside the top-level header and SizeMismatch after it" {
+    const allocator = std.testing.allocator;
+
+    // Pins the behaviour documented in read()'s "Input Length" section, with
+    // and without Options.total_len: a cut inside the top-level header (8
+    // bytes for a leaf, 12 for a container) is InvalidFormat, and every later
+    // cut - including one inside a nested chunk header - is SizeMismatch.
+    const samples = [_]struct { bytes: []const u8, header_len: usize }{
+        .{ .bytes = @embedFile("assets/riff-files/chunk.riff"), .header_len = 8 },
+        .{ .bytes = @embedFile("assets/riff-files/riff_chunk.riff"), .header_len = 12 },
+        .{ .bytes = @embedFile("assets/riff-files/riff_chunk_has_list.riff"), .header_len = 12 },
+    };
+    for (samples) |sample| {
+        for (0..sample.bytes.len) |len| {
+            const expected: anyerror = if (len < sample.header_len) error.InvalidFormat else error.SizeMismatch;
+
+            var reader = std.Io.Reader.fixed(sample.bytes[0..len]);
+            try std.testing.expectError(expected, read(allocator, &reader));
+
+            var sized = std.Io.Reader.fixed(sample.bytes[0..len]);
+            try std.testing.expectError(expected, stream.readTree(allocator, &sized, .{ .total_len = len }));
+        }
+    }
 }
 
 test "read returns SizeMismatch instead of panicking for a near-max declared size" {
