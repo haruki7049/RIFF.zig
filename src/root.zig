@@ -138,6 +138,10 @@ pub const Chunk = union(enum) {
     /// A basic RIFF chunk with a FourCC identifier and data payload.
     /// The `four_cc` is a 4-byte identifier (e.g., "fmt ", "data").
     /// The `data` field contains the chunk's payload bytes.
+    ///
+    /// The four_cc "RIFF" and "LIST" are reserved for containers: use `.riff`
+    /// or `.list` for those. `write()` rejects a leaf with either id with
+    /// `error.ReservedFourCC`.
     chunk: struct {
         four_cc: FourCC,
         data: []const u8,
@@ -229,6 +233,11 @@ pub const WriteError = std.Io.Writer.Error || error{
     /// this cannot happen unless that size computation is broken; it is
     /// reported instead of emitting a container whose size field is unpadded.
     OddContainerSize,
+    /// A leaf `.chunk` has the four_cc "RIFF" or "LIST". Those ids mark
+    /// containers, so `read()` would parse such a chunk's payload as a
+    /// container (failing, or silently turning the leaf into a `.list`/`.riff`)
+    /// instead of returning the leaf. Use `.list`/`.riff` to write a container.
+    ReservedFourCC,
 };
 
 /// Serializes a RIFF chunk to its binary representation and writes it to a writer.
@@ -279,6 +288,8 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///   - `NestingTooDeep`: If `.list`/`.riff` nesting in `chunk` exceeds `max_nesting_depth`.
 ///   - `OddContainerSize`: If a `.list`/`.riff` container's computed size is odd. Cannot
 ///     happen for a correct size computation; nothing is written for that container.
+///   - `ReservedFourCC`: If a leaf `.chunk` has the four_cc "RIFF" or "LIST". Those ids are
+///     reserved for containers (`.riff`/`.list`); nothing is written.
 pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) WriteError!void {
     return writeChunk(chunk, allocator, writer, 0);
 }
@@ -292,6 +303,8 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
     switch (chunk) {
         .chunk => |b| {
+            if (stream.isContainer(&b.four_cc.inner))
+                return error.ReservedFourCC;
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
 
             try writer.writeAll(&b.four_cc.inner);
@@ -355,9 +368,13 @@ fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
 /// recursive with `containerChildrenSize()`, so without a bound a deeply
 /// nested `Chunk` tree could overflow the stack here just as it could in
 /// `writeChunk()`.
-fn serializedSize(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!usize {
+fn serializedSize(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep, ReservedFourCC }!usize {
     return switch (chunk) {
         .chunk => |b| blk: {
+            // Checked here as well as in writeChunk(), so a reserved id deep in
+            // the tree is rejected before any of the tree is written.
+            if (stream.isContainer(&b.four_cc.inner))
+                return error.ReservedFourCC;
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
             break :blk try chunkTotalSize(data_size);
         },
@@ -374,7 +391,7 @@ fn serializedSize(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingToo
 /// fits the u32 RIFF size field - this is exactly the value `write()` puts
 /// in that container's own `size` field. `depth` is the nesting level of
 /// `chunks` themselves (one deeper than their `.list`/`.riff` parent).
-fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!u32 {
+fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep, ReservedFourCC }!u32 {
     var total: usize = 4; // type FourCC
     for (chunks) |child| {
         const child_size = try serializedSize(child, depth);
@@ -591,6 +608,69 @@ test "read() and write() accept the same nesting depth: a tree read() returns ca
     defer allocator.free(too_deep);
     var reader = std.Io.Reader.fixed(too_deep);
     try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
+}
+
+test "write rejects a leaf chunk named RIFF or LIST instead of emitting something read() cannot round-trip" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: write() never looked at a leaf's four_cc, but read()
+    // parses any "RIFF"/"LIST" chunk as a container. A 2-byte payload then
+    // failed with InvalidFormat, and a payload of 4 or more bytes silently
+    // came back as a different structure (a .list/.riff with the payload
+    // reinterpreted as its type FourCC and children).
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        inline for (.{ "ab", "TEST", "TESTdata\x02\x00\x00\x00hi" }) |payload| {
+            const leaf = Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = payload } };
+
+            var w = std.Io.Writer.Allocating.init(allocator);
+            defer w.deinit();
+            try std.testing.expectError(error.ReservedFourCC, write(leaf, allocator, &w.writer));
+            try std.testing.expectEqual(0, w.written().len);
+        }
+    }
+}
+
+test "write rejects a nested reserved leaf before writing anything" {
+    const allocator = std.testing.allocator;
+
+    // The valid sibling before the bad leaf must not be emitted either: the
+    // size pre-pass rejects the whole tree before the header is written.
+    const riff_chunk = Chunk{ .riff = .{
+        .four_cc = try FourCC.new("TEST"),
+        .chunks = &.{
+            .{ .chunk = .{ .four_cc = try FourCC.new("fmt "), .data = "AB" } },
+            .{ .list = .{
+                .four_cc = try FourCC.new("SUB1"),
+                .chunks = &.{
+                    .{ .chunk = .{ .four_cc = try FourCC.new("LIST"), .data = "TEST" } },
+                },
+            } },
+        },
+    } };
+
+    var w = std.Io.Writer.Allocating.init(allocator);
+    defer w.deinit();
+    try std.testing.expectError(error.ReservedFourCC, write(riff_chunk, allocator, &w.writer));
+    try std.testing.expectEqual(0, w.written().len);
+}
+
+test "write only reserves the exact ids RIFF and LIST, which read() treats the same way" {
+    const allocator = std.testing.allocator;
+
+    // read() compares case-sensitively, so a leaf named "list" or "Riff" is an
+    // ordinary leaf on both sides and must still round-trip.
+    inline for (.{ "list", "Riff", "LIS ", "RIFX" }) |id| {
+        const leaf = Chunk{ .chunk = .{ .four_cc = try FourCC.new(id), .data = "TESTdata" } };
+
+        var w = std.Io.Writer.Allocating.init(allocator);
+        defer w.deinit();
+        try write(leaf, allocator, &w.writer);
+
+        var reader = std.Io.Reader.fixed(w.written());
+        const parsed = try read(allocator, &reader);
+        defer parsed.deinit(allocator);
+        try std.testing.expectEqualDeep(leaf, parsed);
+    }
 }
 
 test "write performs no allocation for nested .list/.riff containers" {
