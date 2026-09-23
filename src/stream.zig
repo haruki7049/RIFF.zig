@@ -14,18 +14,24 @@ const FourCC = riff.FourCC;
 const Chunk = riff.Chunk;
 const max_nesting_depth = riff.max_nesting_depth;
 
+/// Errors of `Iterator.next()`, and of the payload accessors once it has
+/// failed. It may gain members in minor releases; keep an `else` prong in a
+/// `switch` over it.
 pub const Error = riff.FormatError || FourCC.NewError || error{
     /// The underlying reader failed (I/O error).
     ReadFailed,
 };
 
-/// Errors of `Iterator.data()`, which borrows from the reader's buffer.
+/// Errors of `Iterator.data()`, which borrows from the reader's buffer. It may
+/// gain members in minor releases; keep an `else` prong in a `switch` over it.
 pub const DataError = Error || AccessError || error{
     /// `data()` was called on a chunk larger than the reader's buffer.
     BufferTooSmall,
 };
 
-/// Errors of `Iterator.data()`/`readDataAlloc()`/`dataReader()` relating to reentrancy.
+/// Errors of `Iterator.data()`/`readDataAlloc()`/`dataReader()` relating to
+/// reentrancy. It may gain members in minor releases; keep an `else` prong in
+/// a `switch` over it.
 pub const BorrowError = error{
     /// `data()`, `readDataAlloc()` or `dataReader()` was called while a
     /// `dataReader()` sub-reader obtained from this same `Iterator` is still
@@ -39,7 +45,8 @@ pub const BorrowError = error{
 };
 
 /// Errors of `Iterator.data()`/`readDataAlloc()`/`dataReader()` for calls made
-/// at the wrong moment: a payload can be taken once per `.chunk` event.
+/// at the wrong moment: a payload can be taken once per `.chunk` event. It may
+/// gain members in minor releases; keep an `else` prong in a `switch` over it.
 pub const AccessError = BorrowError || error{
     /// The last event was not a `.chunk` (e.g. `begin_container`), or the
     /// chunk's payload was already taken.

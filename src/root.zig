@@ -79,7 +79,8 @@ pub const FourCC = struct {
     /// The 4-byte array containing the FourCC identifier.
     inner: [4]u8,
 
-    /// Error type for FourCC creation failures.
+    /// Error type for FourCC creation failures. It may gain members in minor
+    /// releases; keep an `else` prong in a `switch` over it.
     pub const NewError = error{
         /// Returned when the input string is not exactly 4 bytes long.
         InvalidFormat,
@@ -200,7 +201,8 @@ pub const Chunk = union(enum) {
 pub const max_nesting_depth: usize = 64;
 
 /// Errors describing malformed RIFF input, shared by `ReadError` and
-/// `stream.Error`.
+/// `stream.Error`. It may gain members in minor releases; keep an `else` prong
+/// in a `switch` over it.
 pub const FormatError = error{
     /// The input data does not conform to the expected RIFF format structure.
     /// This can happen if chunk headers are incomplete or malformed.
@@ -212,13 +214,15 @@ pub const FormatError = error{
     NestingTooDeep,
 };
 
-/// Error type returned by `read()`.
+/// Error type returned by `read()`. It may gain members in minor releases;
+/// keep an `else` prong in a `switch` over it.
 pub const ReadError = FormatError || std.mem.Allocator.Error || FourCC.NewError || error{
     /// The underlying reader failed (an I/O error, not a problem with the RIFF data).
     ReadFailed,
 };
 
-/// Error type returned by `write()`.
+/// Error type returned by `write()`. It may gain members in minor releases;
+/// keep an `else` prong in a `switch` over it.
 pub const WriteError = std.Io.Writer.Error || error{
     /// A `.chunk`'s data length, or a `.list`/`.riff` chunk's serialized
     /// sub-chunk payload length, does not fit in a `u32` (RIFF size fields
