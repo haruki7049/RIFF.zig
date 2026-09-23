@@ -87,13 +87,33 @@ pub const Iterator = struct {
     kinds: [max_nesting_depth + 1]Kind = undefined,
     depth: usize = 0,
     state: enum { start, running, done } = .start,
+    /// Set by the first error `next()` returns, or by a failed read while
+    /// fetching a payload. The stream position is unreliable after such an
+    /// error, so every later `next()` returns the same error.
+    failed: ?Error = null,
 
     pub fn init(reader: *std.Io.Reader, options: Options) Iterator {
         return .{ .reader = reader, .total_len = options.total_len };
     }
 
     /// Returns the next event, or null once the top-level chunk is complete.
+    ///
+    /// After an error, every further call returns that same error instead of
+    /// continuing from an unreliable position (or reporting a clean end of
+    /// stream). `data()` and `dataReader()` misuse errors
+    /// (`BufferTooSmall`, `AlreadyBorrowed`) consume nothing and are not
+    /// sticky.
     pub fn next(it: *Iterator) Error!?Event {
+        if (it.failed) |e| return e;
+        return it.nextEvent() catch |e| return it.fail(e);
+    }
+
+    fn fail(it: *Iterator, e: Error) Error {
+        it.failed = e;
+        return e;
+    }
+
+    fn nextEvent(it: *Iterator) Error!?Event {
         try it.finishCurrent();
 
         switch (it.state) {
@@ -161,7 +181,7 @@ pub const Iterator = struct {
         if (it.limited != null) return error.AlreadyBorrowed;
         const n: usize = @intCast(it.pending);
         if (n > it.reader.buffer.len) return error.BufferTooSmall;
-        const s = it.reader.take(n) catch |e| return mapPayload(e);
+        const s = it.reader.take(n) catch |e| return it.fail(mapPayload(e));
         it.pos += n;
         it.pending = 0;
         return s;
@@ -268,12 +288,12 @@ pub const Iterator = struct {
     }
 
     fn readExact(it: *Iterator, buf: []u8) Error!void {
-        it.reader.readSliceAll(buf) catch |e| return mapPayload(e);
+        it.reader.readSliceAll(buf) catch |e| return it.fail(mapPayload(e));
         it.pos += buf.len;
     }
 
     fn skip(it: *Iterator, n: u64) Error!void {
-        it.reader.discardAll64(n) catch |e| return mapPayload(e);
+        it.reader.discardAll64(n) catch |e| return it.fail(mapPayload(e));
         it.pos += n;
     }
 };
@@ -746,4 +766,42 @@ test "stream: data()/dataReader() return AlreadyBorrowed while a dataReader() su
     // first sub-reader has been retired via next().
     try testing.expectError(error.AlreadyBorrowed, it.data());
     try testing.expectError(error.AlreadyBorrowed, it.dataReader(&piece));
+}
+
+test "stream: next() keeps returning the same error after a failed first call instead of null" {
+    // Regression test: `state` used to become .running before readTop() ran,
+    // so after readTop() failed a second next() saw depth == 0 and returned
+    // null, which looks like a clean end of stream.
+    var r: std.Io.Reader = .fixed("RIFF" ++ "\x02\x00\x00\x00");
+    var it = Iterator.init(&r, .{});
+
+    try testing.expectError(error.InvalidFormat, it.next());
+    try testing.expectError(error.InvalidFormat, it.next());
+    try testing.expectError(error.InvalidFormat, it.next());
+}
+
+test "stream: next() keeps returning the same error after a mid-stream failure" {
+    // The child claims 0x20 bytes but its container ends right after the
+    // header. A second next() used to see the container as ended and report
+    // a normal end_container event.
+    const buffer = "RIFF" ++ "\x0c\x00\x00\x00" ++ "TEST" ++ "data" ++ "\x20\x00\x00\x00";
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+
+    try testing.expectEqual(Kind.riff, (try it.next()).?.begin_container.kind);
+    try testing.expectError(error.SizeMismatch, it.next());
+    try testing.expectError(error.SizeMismatch, it.next());
+}
+
+test "stream: BufferTooSmall from data() is recoverable and does not stop the iterator" {
+    const buffer = "data" ++ "\x08\x00\x00\x00" ++ "ABCDEFGH";
+    var src: std.Io.Reader = .fixed(buffer);
+    var tiny: [4]u8 = undefined;
+    var small = src.limited(.unlimited, &tiny);
+    var it = Iterator.init(&small.interface, .{});
+
+    _ = (try it.next()).?;
+    try testing.expectError(error.BufferTooSmall, it.data());
+    // Nothing was consumed, so the payload is skipped and iteration ends normally.
+    try testing.expectEqual(null, try it.next());
 }
