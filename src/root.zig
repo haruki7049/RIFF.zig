@@ -318,10 +318,9 @@ fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, 
     try writer.writeAll(&c.four_cc.inner);
     for (c.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
 
-    // Add padding byte if total data size is odd
-    if (size % 2 == 1) {
-        try writer.writeByte(0);
-    }
+    // Every child is already padded to an even length and the type FourCC is
+    // 4 bytes, so a container never needs a pad byte of its own.
+    std.debug.assert(size % 2 == 0);
 }
 
 /// Computes `8 + payload_len` (chunk header) plus the trailing parity pad
