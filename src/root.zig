@@ -426,9 +426,13 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 /// - Arrays of sub-chunks for LIST and RIFF containers
 ///
 /// All allocated memory must be freed by calling `chunk.deinit(allocator)` when done.
-/// Nothing is allocated for a chunk's payload before its bytes have started to
-/// arrive, so a tiny input that merely *claims* a huge chunk fails without a
-/// huge allocation.
+/// `read()` does not know the input length, so it does not trust a chunk's
+/// declared size: nothing is allocated for a chunk's payload before its bytes
+/// have started to arrive, and a tiny input that merely *claims* a huge chunk
+/// fails without a huge allocation. This is specific to `read()`. Calling
+/// `stream.readTree()` with `Options.total_len` allocates each payload in one
+/// piece, trusting that length, so a `total_len` larger than the real input can
+/// make it allocate up to that many bytes before any of them arrive.
 ///
 /// ## Data Format
 ///
