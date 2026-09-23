@@ -430,7 +430,8 @@ pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chun
     const size = std.mem.readInt(u32, buffer[four_cc_len..header_len], .little);
 
     const is_riff = std.mem.eql(u8, id, "RIFF");
-    if (is_riff or std.mem.eql(u8, id, "LIST")) {
+    const is_list = std.mem.eql(u8, id, "LIST");
+    if (is_riff or is_list) {
         if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
 
