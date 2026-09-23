@@ -20,7 +20,7 @@ pub const Error = riff.ToChunkListError || FourCC.NewError || error{
 };
 
 /// Errors of `Iterator.data()`, which borrows from the reader's buffer.
-pub const DataError = Error || BorrowError || error{
+pub const DataError = Error || AccessError || error{
     /// `data()` was called on a chunk larger than the reader's buffer.
     BufferTooSmall,
 };
@@ -37,6 +37,14 @@ pub const BorrowError = error{
     AlreadyBorrowed,
 };
 
+/// Errors of `Iterator.data()`/`readDataAlloc()`/`dataReader()` for calls made
+/// at the wrong moment: a payload can be taken once per `.chunk` event.
+pub const AccessError = BorrowError || error{
+    /// The last event was not a `.chunk` (e.g. `begin_container`), or the
+    /// chunk's payload was already taken.
+    NoPayload,
+};
+
 /// Growth increment `Iterator.readDataAlloc()` uses when a payload is not
 /// already fully buffered.
 pub const alloc_step = 64 * 1024;
@@ -47,8 +55,9 @@ pub const Event = union(enum) {
     /// A RIFF/LIST header was read. Its children follow as further events.
     begin_container: struct { kind: Kind, four_cc: FourCC, size: u32 },
     /// A leaf chunk header was read. Its payload has NOT been read yet: use
-    /// `data()`, `readDataAlloc()` or `dataReader()`, or ignore it and the
-    /// next `next()` call skips it.
+    /// `data()`, `readDataAlloc()` or `dataReader()` (once: a second attempt
+    /// returns `error.NoPayload`), or ignore it and the next `next()` call
+    /// skips it.
     chunk: struct { four_cc: FourCC, size: u32 },
     /// The most recently opened container ended.
     end_container: Kind,
@@ -91,6 +100,9 @@ pub const Iterator = struct {
     /// fetching a payload. The stream position is unreliable after such an
     /// error, so every later `next()` returns the same error.
     failed: ?Error = null,
+    /// True from a `.chunk` event until its payload is taken (`data()`,
+    /// `readDataAlloc()`, `dataReader()`) or the next `next()` call.
+    payload_ready: bool = false,
 
     pub fn init(reader: *std.Io.Reader, options: Options) Iterator {
         return .{ .reader = reader, .total_len = options.total_len };
@@ -100,9 +112,8 @@ pub const Iterator = struct {
     ///
     /// After an error, every further call returns that same error instead of
     /// continuing from an unreliable position (or reporting a clean end of
-    /// stream). `data()` and `dataReader()` misuse errors
-    /// (`BufferTooSmall`, `AlreadyBorrowed`) consume nothing and are not
-    /// sticky.
+    /// stream). Payload access errors (`BufferTooSmall`, `AlreadyBorrowed`,
+    /// `NoPayload`) consume nothing and are not sticky.
     pub fn next(it: *Iterator) Error!?Event {
         if (it.failed) |e| return e;
         return it.nextEvent() catch |e| return it.fail(e);
@@ -172,18 +183,24 @@ pub const Iterator = struct {
 
         it.pending = size;
         it.pending_pad = pad;
+        it.payload_ready = true;
         return .{ .chunk = .{ .four_cc = try FourCC.new(id), .size = size } };
     }
 
     /// Borrows the whole payload of the current chunk from the reader's
     /// buffer. Valid until the next call on this iterator.
+    ///
+    /// Returns `error.NoPayload` unless the last event was a `.chunk` whose
+    /// payload has not been taken yet: the payload can be fetched only once.
     pub fn data(it: *Iterator) DataError![]const u8 {
         if (it.limited != null) return error.AlreadyBorrowed;
+        if (!it.payload_ready) return error.NoPayload;
         const n: usize = @intCast(it.pending);
         if (n > it.reader.buffer.len) return error.BufferTooSmall;
         const s = it.reader.take(n) catch |e| return it.fail(mapPayload(e));
         it.pos += n;
         it.pending = 0;
+        it.payload_ready = false;
         return s;
     }
 
@@ -198,9 +215,12 @@ pub const Iterator = struct {
     /// checked against it, so the payload is allocated in one piece.
     ///
     /// Returns `error.AlreadyBorrowed` if a `dataReader()` sub-reader is
-    /// still open, like `data()` and `dataReader()` do.
-    pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || BorrowError || std.mem.Allocator.Error)![]u8 {
+    /// still open, like `data()` and `dataReader()` do, and
+    /// `error.NoPayload` unless the last event was a `.chunk` whose payload
+    /// has not been taken yet.
+    pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || AccessError || std.mem.Allocator.Error)![]u8 {
         if (it.limited != null) return error.AlreadyBorrowed;
+        if (!it.payload_ready) return error.NoPayload;
         const n: usize = @intCast(it.pending);
 
         if (it.total_len != null or it.reader.bufferedLen() >= n) {
@@ -208,6 +228,7 @@ pub const Iterator = struct {
             errdefer allocator.free(buf);
             try it.readExact(buf);
             it.pending = 0;
+            it.payload_ready = false;
             return buf;
         }
 
@@ -220,13 +241,19 @@ pub const Iterator = struct {
             list.items.len += step;
         }
         it.pending = 0;
+        it.payload_ready = false;
         return list.toOwnedSlice(allocator);
     }
 
     /// Returns a reader limited to the current chunk's payload, for
     /// processing it piece by piece. Valid until the next `next()` call.
-    pub fn dataReader(it: *Iterator, buffer: []u8) BorrowError!*std.Io.Reader {
+    ///
+    /// Returns `error.NoPayload` unless the last event was a `.chunk` whose
+    /// payload has not been taken yet.
+    pub fn dataReader(it: *Iterator, buffer: []u8) AccessError!*std.Io.Reader {
         if (it.limited != null) return error.AlreadyBorrowed;
+        if (!it.payload_ready) return error.NoPayload;
+        it.payload_ready = false;
         it.limited = it.reader.limited(.limited(@intCast(it.pending)), buffer);
         return &it.limited.?.interface;
     }
@@ -259,11 +286,13 @@ pub const Iterator = struct {
         if (it.total_len) |total| if (total < data_end) return error.SizeMismatch;
         it.pending = size;
         it.pending_pad = 0;
+        it.payload_ready = true;
         return .{ .chunk = .{ .four_cc = try FourCC.new(id), .size = size } };
     }
 
     /// Skips whatever the caller left unread of the current chunk.
     fn finishCurrent(it: *Iterator) Error!void {
+        it.payload_ready = false;
         if (it.limited) |l| {
             // Bytes the sub-reader pulled from `reader` (even if still sitting
             // unread in its own buffer) are gone from `reader`.
@@ -321,7 +350,7 @@ pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: O
         .chunk => |c| {
             // readTree() never calls dataReader(), so no sub-reader is open.
             const d = it.readDataAlloc(allocator) catch |e| switch (e) {
-                error.AlreadyBorrowed => unreachable,
+                error.AlreadyBorrowed, error.NoPayload => unreachable,
                 else => |other| return other,
             };
             const ch: Chunk = .{ .chunk = .{ .four_cc = c.four_cc, .data = d } };
@@ -821,4 +850,67 @@ test "stream: BufferTooSmall from data() is recoverable and does not stop the it
     try testing.expectError(error.BufferTooSmall, it.data());
     // Nothing was consumed, so the payload is skipped and iteration ends normally.
     try testing.expectEqual(null, try it.next());
+}
+
+test "stream: a chunk's payload can be taken only once" {
+    // Regression test: after data()/readDataAlloc() consumed a payload,
+    // `pending` was 0, so a second call silently returned an empty slice.
+    const buffer = "data" ++ "\x02\x00\x00\x00" ++ "AB";
+
+    {
+        var r: std.Io.Reader = .fixed(buffer);
+        var it = Iterator.init(&r, .{});
+        _ = (try it.next()).?;
+        try testing.expectEqualStrings("AB", try it.data());
+        try testing.expectError(error.NoPayload, it.data());
+        try testing.expectError(error.NoPayload, it.readDataAlloc(testing.allocator));
+        var piece: [4]u8 = undefined;
+        try testing.expectError(error.NoPayload, it.dataReader(&piece));
+    }
+    {
+        var r: std.Io.Reader = .fixed(buffer);
+        var it = Iterator.init(&r, .{});
+        _ = (try it.next()).?;
+        const got = try it.readDataAlloc(testing.allocator);
+        defer testing.allocator.free(got);
+        try testing.expectEqualStrings("AB", got);
+        try testing.expectError(error.NoPayload, it.readDataAlloc(testing.allocator));
+        try testing.expectError(error.NoPayload, it.data());
+    }
+}
+
+test "stream: an empty chunk yields an empty payload once, then NoPayload" {
+    var r: std.Io.Reader = .fixed("data" ++ "\x00\x00\x00\x00");
+    var it = Iterator.init(&r, .{});
+    _ = (try it.next()).?;
+    try testing.expectEqual(0, (try it.data()).len);
+    try testing.expectError(error.NoPayload, it.data());
+}
+
+test "stream: payload access on a container event returns NoPayload" {
+    const buffer = "RIFF" ++ "\x04\x00\x00\x00" ++ "TEST";
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+
+    try testing.expectEqual(Kind.riff, (try it.next()).?.begin_container.kind);
+    var piece: [4]u8 = undefined;
+    try testing.expectError(error.NoPayload, it.data());
+    try testing.expectError(error.NoPayload, it.readDataAlloc(testing.allocator));
+    try testing.expectError(error.NoPayload, it.dataReader(&piece));
+    // The misuse errors consume nothing.
+    try testing.expectEqual(Kind.riff, (try it.next()).?.end_container);
+}
+
+test "stream: the payload is still available after BufferTooSmall from data()" {
+    const buffer = "data" ++ "\x08\x00\x00\x00" ++ "ABCDEFGH";
+    var src: std.Io.Reader = .fixed(buffer);
+    var tiny: [4]u8 = undefined;
+    var small = src.limited(.unlimited, &tiny);
+    var it = Iterator.init(&small.interface, .{});
+
+    _ = (try it.next()).?;
+    try testing.expectError(error.BufferTooSmall, it.data());
+    const got = try it.readDataAlloc(testing.allocator);
+    defer testing.allocator.free(got);
+    try testing.expectEqualStrings("ABCDEFGH", got);
 }
