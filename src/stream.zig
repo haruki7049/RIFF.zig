@@ -775,6 +775,67 @@ test "stream: differential against the reference parser on deeply nested input a
     }
 }
 
+// A reader over `bytes` that returns error.ReadFailed, like a failing file or
+// socket, once `fail_after` bytes have been delivered. (A fixed reader can
+// only end the stream, which reads as EndOfStream.)
+const FailingReader = struct {
+    src: std.Io.Reader,
+    remaining: usize,
+    interface: std.Io.Reader,
+
+    fn init(bytes: []const u8, fail_after: usize, buffer: []u8) FailingReader {
+        return .{
+            .src = .fixed(bytes),
+            .remaining = fail_after,
+            .interface = .{
+                .vtable = &.{ .stream = stream },
+                .buffer = buffer,
+                .seek = 0,
+                .end = 0,
+            },
+        };
+    }
+
+    fn stream(r: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+        const self: *FailingReader = @fieldParentPtr("interface", r);
+        if (self.remaining == 0) return error.ReadFailed;
+        const n = try self.src.stream(w, limit.min(.limited(self.remaining)));
+        self.remaining -= n;
+        return n;
+    }
+};
+
+test "stream: a failing reader gives ReadFailed at every cut point, never a misclassified error" {
+    // Nothing else feeds the parser a reader that fails (a fixed reader only
+    // reaches EndOfStream), so the ReadFailed branches of mapHeader() and
+    // mapPayload() were untested. Each sample is consumed to its very last
+    // byte by the parser, so failing at any earlier point must surface as
+    // ReadFailed: in the top-level header, a nested header, or a payload, with
+    // and without Options.total_len and through a 1-byte and a 16-byte buffer.
+    const a = testing.allocator;
+    for (samples[0..4]) |bytes| {
+        for (0..bytes.len) |fail_after| {
+            for ([_]?u64{ null, bytes.len }) |total_len| {
+                var tiny: [1]u8 = undefined;
+                var small: [16]u8 = undefined;
+                inline for (.{ &tiny, &small }) |buffer| {
+                    var fr = FailingReader.init(bytes, fail_after, buffer);
+                    try testing.expectError(error.ReadFailed, readTree(a, &fr.interface, .{ .total_len = total_len }));
+                }
+            }
+        }
+    }
+}
+
+test "stream: ReadFailed is sticky on the iterator" {
+    var fr = FailingReader.init("data" ++ "\x02\x00\x00\x00" ++ "AB", 6, &.{});
+    var it = Iterator.init(&fr.interface, .{});
+
+    // The failure hits inside the 8-byte header.
+    try testing.expectError(error.ReadFailed, it.next());
+    try testing.expectError(error.ReadFailed, it.next());
+}
+
 test "stream: a tiny input claiming a huge chunk fails without a huge allocation" {
     // 256 KiB is far below the ~4 GiB the headers claim: trusting the size
     // field would fail with OutOfMemory instead of SizeMismatch.
