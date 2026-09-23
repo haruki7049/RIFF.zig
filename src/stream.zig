@@ -669,6 +669,56 @@ test "stream: skip everything but one chunk, streamed in 256-byte pieces" {
 // `Options.total_len` the error kind must match too; without it, it may
 // differ, since the reference parser checks the top-level size before the
 // children and a stream of unknown length cannot.
+// Applies one random corruption to `buf[0..len]` (truncation, a few byte
+// flips, or a rewritten size field) and returns the new length.
+fn mutate(rand: std.Random, buf: []u8, len_in: usize) usize {
+    var len = len_in;
+    switch (rand.uintLessThan(u8, 3)) {
+        0 => len = rand.uintLessThan(usize, len + 1),
+        1 => for (0..rand.intRangeAtMost(usize, 1, 3)) |_| {
+            buf[rand.uintLessThan(usize, len)] = rand.int(u8);
+        },
+        else => {
+            const p = rand.uintLessThan(usize, len - 3);
+            std.mem.writeInt(u32, buf[p..][0..4], rand.uintLessThan(u32, 80), .little);
+        },
+    }
+    return len;
+}
+
+// Checks that the reference parser and readTree() agree on `input`, both
+// with and without `Options.total_len`, and both fed through a 1-byte buffer.
+fn expectAgreesWithReference(a: std.mem.Allocator, input: []const u8) !void {
+    var r1: std.Io.Reader = .fixed(input);
+    const old = referenceRead(a, &r1);
+    defer if (old) |c| c.deinit(a) else |_| {};
+
+    for ([_]?u64{ null, input.len }) |total_len| {
+        // Stream through a 1-byte buffer to stress refills.
+        var r2: std.Io.Reader = .fixed(input);
+        var tiny: [1]u8 = undefined;
+        var lim = r2.limited(.unlimited, &tiny);
+        const new = readTree(a, &lim.interface, .{ .total_len = total_len });
+        defer if (new) |c| c.deinit(a) else |_| {};
+
+        if (old) |o| {
+            const nn = new catch |e| {
+                std.debug.print("reference ok, readTree(total_len={?d}) {t}: {x}\n", .{ total_len, e, input });
+                return error.TestUnexpectedResult;
+            };
+            try expectSameTree(o, nn);
+        } else |eo| {
+            if (new) |_| {
+                std.debug.print("reference {t}, readTree(total_len={?d}) ok: {x}\n", .{ eo, total_len, input });
+                return error.TestUnexpectedResult;
+            } else |en| if (total_len != null and eo != en) {
+                std.debug.print("reference {t}, readTree(total_len={?d}) {t}: {x}\n", .{ eo, total_len, en, input });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
+}
+
 test "stream: differential against the reference parser on mutated/truncated samples" {
     const a = testing.allocator;
     var prng = std.Random.DefaultPrng.init(0x5eed);
@@ -677,48 +727,49 @@ test "stream: differential against the reference parser on mutated/truncated sam
 
     for (samples[0..4]) |seed| {
         for (0..5000) |_| {
-            var len = seed.len;
-            @memcpy(buf[0..len], seed);
-            switch (rand.uintLessThan(u8, 3)) {
-                0 => len = rand.uintLessThan(usize, seed.len + 1),
-                1 => for (0..rand.intRangeAtMost(usize, 1, 3)) |_| {
-                    buf[rand.uintLessThan(usize, len)] = rand.int(u8);
-                },
-                else => {
-                    const p = rand.uintLessThan(usize, len - 3);
-                    std.mem.writeInt(u32, buf[p..][0..4], rand.uintLessThan(u32, 80), .little);
-                },
-            }
-            const input = buf[0..len];
+            @memcpy(buf[0..seed.len], seed);
+            const len = mutate(rand, &buf, seed.len);
+            try expectAgreesWithReference(a, buf[0..len]);
+        }
+    }
+}
 
-            var r1: std.Io.Reader = .fixed(input);
-            const old = referenceRead(a, &r1);
-            defer if (old) |c| c.deinit(a) else |_| {};
+// `containers` nested containers as raw bytes: an outermost "RIFF", then
+// "LIST"s, with a small leaf in the innermost one.
+fn nestedContainers(a: std.mem.Allocator, containers: usize) ![]u8 {
+    var prev = try a.dupe(u8, "data" ++ "\x02\x00\x00\x00" ++ "AB");
+    errdefer a.free(prev);
+    for (0..containers) |i| {
+        const wrapped = try a.alloc(u8, 12 + prev.len);
+        @memcpy(wrapped[0..4], if (i == containers - 1) "RIFF" else "LIST");
+        std.mem.writeInt(u32, wrapped[4..8], @intCast(4 + prev.len), .little);
+        @memcpy(wrapped[8..12], "TEST");
+        @memcpy(wrapped[12..], prev);
+        a.free(prev);
+        prev = wrapped;
+    }
+    return prev;
+}
 
-            for ([_]?u64{ null, input.len }) |total_len| {
-                // Stream through a 1-byte buffer to stress refills.
-                var r2: std.Io.Reader = .fixed(input);
-                var tiny: [1]u8 = undefined;
-                var lim = r2.limited(.unlimited, &tiny);
-                const new = readTree(a, &lim.interface, .{ .total_len = total_len });
-                defer if (new) |c| c.deinit(a) else |_| {};
+test "stream: differential against the reference parser on deeply nested input around max_nesting_depth" {
+    // The samples above are too small to nest more than a few levels, so they
+    // never reach the depth limit. Cover chains just below, at and just above
+    // it, unmodified and mutated.
+    const a = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xdee9);
+    const rand = prng.random();
 
-                if (old) |o| {
-                    const nn = new catch |e| {
-                        std.debug.print("reference ok, readTree(total_len={?d}) {t}: {x}\n", .{ total_len, e, input });
-                        return error.TestUnexpectedResult;
-                    };
-                    try expectSameTree(o, nn);
-                } else |eo| {
-                    if (new) |_| {
-                        std.debug.print("reference {t}, readTree(total_len={?d}) ok: {x}\n", .{ eo, total_len, input });
-                        return error.TestUnexpectedResult;
-                    } else |en| if (total_len != null and eo != en) {
-                        std.debug.print("reference {t}, readTree(total_len={?d}) {t}: {x}\n", .{ eo, total_len, en, input });
-                        return error.TestUnexpectedResult;
-                    }
-                }
-            }
+    for (max_nesting_depth - 2..max_nesting_depth + 4) |containers| {
+        const seed = try nestedContainers(a, containers);
+        defer a.free(seed);
+        try expectAgreesWithReference(a, seed);
+
+        const buf = try a.alloc(u8, seed.len);
+        defer a.free(buf);
+        for (0..300) |_| {
+            @memcpy(buf, seed);
+            const len = mutate(rand, buf, seed.len);
+            try expectAgreesWithReference(a, buf[0..len]);
         }
     }
 }
