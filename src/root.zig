@@ -451,11 +451,15 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 /// reported as `InvalidFormat` if it ends inside the top-level chunk's header
 /// (8 bytes for a leaf chunk, 12 for a RIFF/LIST container, whose header
 /// includes the type FourCC), and as `SizeMismatch` if it ends anywhere after
-/// that, including inside a nested chunk header. If you know the input's length
-/// (a file's size, a fixed buffer's length), call `stream.readTree()` with
-/// `Options.total_len` instead: the same errors are reported, but a declared
-/// size larger than the input is rejected before anything is read, and each
-/// payload is allocated in one piece.
+/// that, including inside a nested chunk header. The exception is a container
+/// whose declared end leaves 2 to 7 bytes after its header or after one of its
+/// children: that is too short for a chunk header, so `read()` reports
+/// `InvalidFormat` without reading any further, whether or not those bytes are
+/// actually present. If you know the input's length (a file's size, a fixed
+/// buffer's length), call `stream.readTree()` with `Options.total_len`
+/// instead: a declared size larger than the input is then rejected with
+/// `SizeMismatch` before any payload is read (including in that exceptional
+/// case), and each payload is allocated in one piece.
 ///
 /// ## Padding
 ///
@@ -948,6 +952,40 @@ test "a truncated input is InvalidFormat inside the top-level header and SizeMis
             var sized = std.Io.Reader.fixed(sample.bytes[0..len]);
             try std.testing.expectError(expected, stream.readTree(allocator, &sized, .{ .total_len = len }));
         }
+    }
+}
+
+test "a container whose declared end leaves 2 to 7 bytes is InvalidFormat without total_len, SizeMismatch with it" {
+    const allocator = std.testing.allocator;
+
+    // Pins the exception documented in read()'s "Input Length" section: a
+    // remainder of 2 to 7 bytes is too short for a chunk header, so it is
+    // reported as InvalidFormat before anything is read, present or not.
+    // With Options.total_len the declared size is checked against the real
+    // input first, so a truncated input reports SizeMismatch instead.
+    const child = "even" ++ "\x02\x00\x00\x00" ++ "BB";
+
+    // Declared size 7 = type FourCC (4) + 3 bytes, none of which are present.
+    const after_header = "RIFF" ++ "\x07\x00\x00\x00" ++ "TEST";
+    // Declared size 17 = type FourCC (4) + a 10-byte child + 3 bytes, none present.
+    const after_child = "RIFF" ++ "\x11\x00\x00\x00" ++ "TEST" ++ child;
+
+    inline for (.{ after_header, after_child }) |input| {
+        var reader = std.Io.Reader.fixed(input);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+
+        var sized = std.Io.Reader.fixed(input);
+        try std.testing.expectError(error.SizeMismatch, stream.readTree(allocator, &sized, .{ .total_len = input.len }));
+    }
+
+    // With the 3 bytes present the input is complete but malformed: the same
+    // InvalidFormat either way.
+    inline for (.{ after_header ++ "abc", after_child ++ "abc" }) |input| {
+        var reader = std.Io.Reader.fixed(input);
+        try std.testing.expectError(error.InvalidFormat, read(allocator, &reader));
+
+        var sized = std.Io.Reader.fixed(input);
+        try std.testing.expectError(error.InvalidFormat, stream.readTree(allocator, &sized, .{ .total_len = input.len }));
     }
 }
 
