@@ -247,7 +247,7 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///
 /// The function serializes nested chunks in two passes: first it computes
 /// each `.list`/`.riff` container's total serialized size with a pure,
-/// allocation-free walk of the tree (`container_children_size`), then it
+/// allocation-free walk of the tree (`containerChildrenSize`), then it
 /// streams the header and children directly to `writer`. No intermediate
 /// buffer is built, so nested containers are not copied once per level.
 ///
@@ -305,7 +305,7 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
 /// streams each child directly to `writer` - see `write()`'s doc comment
 /// for why this needs no intermediate buffer.
 fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
-    const size = try container_children_size(c.chunks, depth + 1);
+    const size = try containerChildrenSize(c.chunks, depth + 1);
 
     try writer.writeAll(id);
     try writer.writeInt(u32, size, .little);
@@ -323,7 +323,7 @@ fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, 
 /// wider than `u32`: on a 32-bit target `usize` is `u32`, so there is no
 /// wider type to widen into and the addition could still overflow-panic for
 /// a `payload_len` near `maxInt(u32)`. Shared by every arm of
-/// `serialized_size` since the formula is identical for each.
+/// `serializedSize` since the formula is identical for each.
 fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
     const with_header = std.math.add(usize, 8, payload_len) catch return error.PayloadTooLarge;
     return std.math.add(usize, with_header, payload_len % 2) catch error.PayloadTooLarge;
@@ -337,10 +337,10 @@ fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
 ///
 /// `depth` is `chunk`'s own nesting level, bounded by `max_nesting_depth`
 /// the same way the streaming parser bounds `read()` - this is mutually
-/// recursive with `container_children_size()`, so without a bound a deeply
+/// recursive with `containerChildrenSize()`, so without a bound a deeply
 /// nested `Chunk` tree could overflow the stack here just as it could in
 /// `writeChunk()`.
-fn serialized_size(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!usize {
+fn serializedSize(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!usize {
     if (depth > max_nesting_depth)
         return error.NestingTooDeep;
 
@@ -349,19 +349,19 @@ fn serialized_size(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTo
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
             break :blk try chunkTotalSize(data_size);
         },
-        .list, .riff => |c| try chunkTotalSize(try container_children_size(c.chunks, depth + 1)),
+        .list, .riff => |c| try chunkTotalSize(try containerChildrenSize(c.chunks, depth + 1)),
     };
 }
 
-/// Sums `serialized_size` over `chunks` plus the 4-byte type FourCC that
+/// Sums `serializedSize` over `chunks` plus the 4-byte type FourCC that
 /// precedes them inside a `.list`/`.riff` container, and checks the result
 /// fits the u32 RIFF size field - this is exactly the value `write()` puts
 /// in that container's own `size` field. `depth` is the nesting level of
 /// `chunks` themselves (one deeper than their `.list`/`.riff` parent).
-fn container_children_size(chunks: []const Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!u32 {
+fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!u32 {
     var total: usize = 4; // type FourCC
     for (chunks) |child| {
-        const child_size = try serialized_size(child, depth);
+        const child_size = try serializedSize(child, depth);
         total = std.math.add(usize, total, child_size) catch return error.PayloadTooLarge;
     }
     return std.math.cast(u32, total) orelse error.PayloadTooLarge;
@@ -480,8 +480,8 @@ test "write returns PayloadTooLarge for children whose sizes fit individually bu
     const allocator = std.testing.allocator;
 
     // Regression test: the previous test only exercises the leaf-level
-    // std.math.cast(u32, data.len) check in serialized_size(). The separate
-    // aggregate-sum check in container_children_size() - two children each
+    // std.math.cast(u32, data.len) check in serializedSize(). The separate
+    // aggregate-sum check in containerChildrenSize() - two children each
     // individually within the u32 limit, but whose combined encoded size
     // exceeds it - was untested. As with the other regression test, build
     // slices whose length is huge without actually allocating: write() never
@@ -502,7 +502,7 @@ test "write returns PayloadTooLarge for children whose sizes fit individually bu
 test "write returns NestingTooDeep instead of overflowing the stack for excessively nested chunks" {
     const allocator = std.testing.allocator;
 
-    // Regression test: write()/serialized_size()/container_children_size()
+    // Regression test: write()/serializedSize()/containerChildrenSize()
     // used to recurse once per nested .list/.riff level with no depth
     // limit, unlike read(). Nothing requires a Chunk tree
     // passed to write() to have come from read() (which is already
