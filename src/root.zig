@@ -42,7 +42,7 @@
 //!     defer out_file.close(io);
 //!     var out_buffer: [4096]u8 = undefined;
 //!     var file_writer = out_file.writer(io, &out_buffer);
-//!     try riff.write(wave_chunk, allocator, &file_writer.interface);
+//!     try riff.write(wave_chunk, &file_writer.interface);
 //!     try file_writer.interface.flush();
 //!
 //!     // Parse from file. read() pulls bytes from the reader as it goes, so a
@@ -278,8 +278,6 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///
 /// Parameters:
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
-///   - `allocator`: Unused by `write()` itself; kept for API stability. `write()` performs no
-///     allocation of its own.
 ///   - `writer`: The `std.Io.Writer` to output the serialized binary data to (e.g. `&file_writer.interface`,
 ///     `&std.Io.Writer.Allocating.writer`).
 ///
@@ -295,8 +293,8 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///     happen for a correct size computation; nothing is written for that container.
 ///   - `ReservedFourCC`: If a leaf `.chunk` has the four_cc "RIFF" or "LIST". Those ids are
 ///     reserved for containers (`.riff`/`.list`); nothing is written.
-pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) WriteError!void {
-    return writeChunk(chunk, allocator, writer, 0);
+pub fn write(chunk: Chunk, writer: *std.Io.Writer) WriteError!void {
+    return writeChunk(chunk, writer, 0);
 }
 
 /// `write()`'s actual implementation, with the nesting-depth counter that
@@ -305,7 +303,7 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 /// `Chunk` tree passed to `write()` isn't required to have come from
 /// `read()`, so nothing else stops a deeply nested tree built some other way
 /// from overflowing the stack here.
-fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
+fn writeChunk(chunk: Chunk, writer: *std.Io.Writer, depth: usize) WriteError!void {
     switch (chunk) {
         .chunk => |b| {
             if (stream.isContainer(&b.four_cc.inner))
@@ -326,7 +324,7 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
                 return error.NestingTooDeep;
 
             const id = if (tag == .list) "LIST" else "RIFF";
-            try writeContainer(id, c, allocator, writer, depth);
+            try writeContainer(id, c, writer, depth);
         },
     }
 }
@@ -335,7 +333,7 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
 /// ("LIST" or "RIFF"), the container's total size, its type FourCC, then
 /// streams each child directly to `writer` - see `write()`'s doc comment
 /// for why this needs no intermediate buffer.
-fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
+fn writeContainer(id: *const [4]u8, c: Container, writer: *std.Io.Writer, depth: usize) WriteError!void {
     const size = try containerChildrenSize(c.chunks, depth + 1);
 
     // Every child is already padded to an even length and the type FourCC is
@@ -348,7 +346,7 @@ fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, 
     try writer.writeAll(id);
     try writer.writeInt(u32, size, .little);
     try writer.writeAll(&c.four_cc.inner);
-    for (c.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
+    for (c.chunks) |child| try writeChunk(child, writer, depth + 1);
 }
 
 /// Computes `8 + payload_len` (chunk header) plus the trailing parity pad
@@ -521,7 +519,7 @@ test "chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(chunk, allocator, &w.writer);
+    try write(chunk, &w.writer);
     const chunk_data = w.written();
 
     const expected = "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
@@ -547,7 +545,7 @@ test "write returns PayloadTooLarge instead of panicking for oversized chunk dat
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try std.testing.expectError(error.PayloadTooLarge, write(chunk, allocator, &w.writer));
+    try std.testing.expectError(error.PayloadTooLarge, write(chunk, &w.writer));
 }
 
 test "write returns PayloadTooLarge for children whose sizes fit individually but overflow in aggregate" {
@@ -570,7 +568,7 @@ test "write returns PayloadTooLarge for children whose sizes fit individually bu
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try std.testing.expectError(error.PayloadTooLarge, write(list_chunk, allocator, &w.writer));
+    try std.testing.expectError(error.PayloadTooLarge, write(list_chunk, &w.writer));
 }
 
 test "write returns NestingTooDeep instead of overflowing the stack for excessively nested chunks" {
@@ -600,7 +598,7 @@ test "write returns NestingTooDeep instead of overflowing the stack for excessiv
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try std.testing.expectError(error.NestingTooDeep, write(chunk, allocator, &w.writer));
+    try std.testing.expectError(error.NestingTooDeep, write(chunk, &w.writer));
 }
 
 /// Builds `containers` nested containers as raw bytes: an outermost "RIFF",
@@ -641,7 +639,7 @@ test "read() and write() accept the same nesting depth: a tree read() returns ca
 
         var w = std.Io.Writer.Allocating.init(allocator);
         defer w.deinit();
-        try write(parsed, allocator, &w.writer);
+        try write(parsed, &w.writer);
         try std.testing.expectEqualSlices(u8, bytes, w.written());
     }
 
@@ -665,7 +663,7 @@ test "write rejects a leaf chunk named RIFF or LIST instead of emitting somethin
 
             var w = std.Io.Writer.Allocating.init(allocator);
             defer w.deinit();
-            try std.testing.expectError(error.ReservedFourCC, write(leaf, allocator, &w.writer));
+            try std.testing.expectError(error.ReservedFourCC, write(leaf, &w.writer));
             try std.testing.expectEqual(0, w.written().len);
         }
     }
@@ -691,7 +689,7 @@ test "write rejects a nested reserved leaf before writing anything" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try std.testing.expectError(error.ReservedFourCC, write(riff_chunk, allocator, &w.writer));
+    try std.testing.expectError(error.ReservedFourCC, write(riff_chunk, &w.writer));
     try std.testing.expectEqual(0, w.written().len);
 }
 
@@ -705,7 +703,7 @@ test "write only reserves the exact ids RIFF and LIST, which read() treats the s
 
         var w = std.Io.Writer.Allocating.init(allocator);
         defer w.deinit();
-        try write(leaf, allocator, &w.writer);
+        try write(leaf, &w.writer);
 
         var reader = std.Io.Reader.fixed(w.written());
         const parsed = try read(allocator, &reader);
@@ -714,20 +712,14 @@ test "write only reserves the exact ids RIFF and LIST, which read() treats the s
     }
 }
 
-test "write performs no allocation for nested .list/.riff containers" {
-    // Regression test: write()'s .list/.riff branches used to build each
-    // nesting level's serialized children in a temporary
-    // std.Io.Writer.Allocating buffer before copying it into the parent -
-    // meaning every level needed at least one allocation, and the same bytes
-    // were copied again at each level on the way up. write() now computes
-    // container sizes with a pure, allocation-free helper and streams
-    // children directly to the real writer, so it should need no allocation
-    // at all. Pass an allocator that fails on the very first allocation
-    // attempt, and a non-allocating fixed-buffer writer, so any allocation
-    // anywhere in write() (its own, or the destination writer's) fails loudly.
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
-    const allocator = failing.allocator();
-
+test "write needs no allocation for nested .list/.riff containers" {
+    // write()'s .list/.riff branches used to build each nesting level's
+    // serialized children in a temporary std.Io.Writer.Allocating buffer
+    // before copying it into the parent, so every level needed an allocation.
+    // write() now computes container sizes with a pure, allocation-free helper
+    // and streams children directly to the real writer, and it takes no
+    // allocator at all. Writing into a non-allocating fixed-buffer writer
+    // shows the whole path works without any allocation.
     const nested = Chunk{ .riff = .{
         .four_cc = try FourCC.new("TEST"),
         .chunks = &.{
@@ -742,7 +734,7 @@ test "write performs no allocation for nested .list/.riff containers" {
 
     var buffer: [256]u8 = undefined;
     var w = std.Io.Writer.fixed(&buffer);
-    try write(nested, allocator, &w);
+    try write(nested, &w);
 
     const expected = "RIFF" ++ "\x1a\x00\x00\x00" ++ "TEST" ++ "LIST" ++ "\x0e\x00\x00\x00" ++ "SUB1" ++ "data" ++ "\x02\x00\x00\x00" ++ "hi";
     try std.testing.expectEqualSlices(u8, expected, w.buffered());
@@ -761,7 +753,7 @@ test "list_chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(list_chunk, allocator, &w.writer);
+    try write(list_chunk, &w.writer);
     const list_chunk_data: []u8 = w.written();
 
     const expected = "LIST" ++ "\x2c\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA" ++ "fmt " ++ "\x0c\x00\x00\x00" ++ "EXAMPLE_DATA";
@@ -787,7 +779,7 @@ test "list_chunk with an odd-sized chunk followed by a sibling chunk round-trips
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(list_chunk, allocator, &w.writer);
+    try write(list_chunk, &w.writer);
     const list_chunk_data: []u8 = w.written();
 
     var reader = std.Io.Reader.fixed(list_chunk_data);
@@ -819,7 +811,7 @@ test "a nested .riff chunk round-trips instead of losing its structure" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(list_chunk, allocator, &w.writer);
+    try write(list_chunk, &w.writer);
     const list_chunk_data: []u8 = w.written();
 
     var reader = std.Io.Reader.fixed(list_chunk_data);
@@ -850,7 +842,7 @@ test "a .riff chunk nested inside another .riff chunk round-trips" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(riff_chunk, allocator, &w.writer);
+    try write(riff_chunk, &w.writer);
     const riff_chunk_data: []u8 = w.written();
 
     var reader = std.Io.Reader.fixed(riff_chunk_data);
@@ -873,7 +865,7 @@ test "riff_chunk serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(riff_chunk, allocator, &w.writer);
+    try write(riff_chunk, &w.writer);
     const riff_chunk_data: []u8 = w.written();
 
     const expected = "RIFF" ++ "\x14\x00\x00\x00" ++ "TEST" ++ "fmt " ++ "\x00\x00\x00\x00" ++ "" ++ "data" ++ "\x00\x00\x00\x00" ++ "";
@@ -899,7 +891,7 @@ test "riff_chunk trailing bytes after the declared size are not absorbed as sub-
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(riff_chunk, allocator, &w.writer);
+    try write(riff_chunk, &w.writer);
     const riff_chunk_data = w.written();
 
     const trailing = "JUNK" ++ "\x02\x00\x00\x00";
@@ -1131,7 +1123,7 @@ test "read ignores the value of the pad byte after an odd-sized chunk, and write
 
             var w = std.Io.Writer.Allocating.init(allocator);
             defer w.deinit();
-            try write(parsed, allocator, &w.writer);
+            try write(parsed, &w.writer);
             try std.testing.expectEqualSlices(u8, id ++ "\x18\x00\x00\x00" ++ "TEST" ++ odd ++ "\x00" ++ even, w.written());
         }
         {
@@ -1369,7 +1361,7 @@ test "FluidR3_GM2-2.sf2 serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(soundfont, allocator, &w.writer);
+    try write(soundfont, &w.writer);
     const webp_data: []u8 = w.written();
 
     const webp_file: []const u8 = @embedFile("assets/riff-files/FluidR3_GM2-2.sf2");
@@ -1392,7 +1384,7 @@ test "Webp serialization" {
 
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
-    try write(webp, allocator, &w.writer);
+    try write(webp, &w.writer);
     const webp_data: []u8 = w.written();
 
     const webp_file: []const u8 = @embedFile("assets/riff-files/test_DJ.webp");
