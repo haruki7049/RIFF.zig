@@ -78,6 +78,44 @@ pub fn main() !void {
 }
 ```
 
+## Concurrent I/O
+
+`read()` and `write()` never call `std.Io` themselves - they only operate
+on the `*std.Io.Reader`/`*std.Io.Writer` interface you hand them. Whether
+a call blocks the calling context or runs concurrently with other work is
+therefore entirely up to the `std.Io` implementation you pass when
+building that reader/writer (e.g. `std.Io.Threaded`, the thread-pool-backed
+implementation every `std.process.Init.io` uses by default), so no
+separate "async" API is needed: wrap the call in `io.async()` at the call
+site.
+
+```zig
+const std = @import("std");
+const riff = @import("riff_zig");
+
+fn parseFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !riff.Chunk {
+    const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .unlimited);
+    defer allocator.free(data);
+    var reader: std.Io.Reader = .fixed(data);
+    return riff.read(allocator, &reader);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const allocator = init.gpa;
+
+    // Runs on a worker thread; the calling thread is free to make progress
+    // on other work while the parse is in flight.
+    var future = io.async(parseFile, .{ io, allocator, "input.wav" });
+    // ... do other work here ...
+    const chunk = try future.await(io);
+    defer chunk.deinit(allocator);
+}
+```
+
+The same applies to `write()`: wrap the call (and whatever writer setup it
+needs) in a function passed to `io.async()`.
+
 ## API Overview
 
 - `riff.read(allocator, reader)`: Parses a RIFF chunk from a binary stream.
