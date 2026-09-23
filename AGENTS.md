@@ -11,8 +11,9 @@ ______________________________________________________________________
 - **Development Environment**: Managed with Nix (`flake.nix`), `direnv`, and `treefmt-nix` (via `treefmt-nix`) for formatting Zig, Nix, GitHub Actions, and Markdown files. `treefmt` is available on `PATH` inside `nix develop` (or via direnv) through the default devShell's `inputsFrom`.
 - **Target Language Version**: Zig `0.16.0` (`minimum_zig_version` in `build.zig.zon`). This library has no external Zig package dependencies (`dependencies = {}`).
 - **Directory Structure**:
-  - `src/root.zig`: Library entry point (public API, chunk parsing/writing logic and tests).
-  - `src/assertion_data.zig`: Shared test assertion helpers.
+  - `src/root.zig`: Library entry point (public API: `Chunk`, `FourCC`, `read()`, `write()`, the size computation `write()` uses, and tests).
+  - `src/stream.zig`: Streaming parser (`stream.Iterator`, a pull-style event iterator) and the tree builder `stream.readTree()`, which `read()` is implemented with, plus its tests.
+  - `src/assertion_data.zig`: Generated expected-data constants (`XMP`, `VP8`, `VP8X`, `EXIF`) for the WebP fixture used by tests.
   - `src/assets/riff-files/`, `src/assets/chunk-data/`: Sample RIFF files and expected chunk-data fixtures used by tests. `.sf2` and `.bin` files are tracked via **Git LFS** (see `.gitattributes` / `.lfsconfig`).
   - `build.zig` & `build.zig.zon`: Build definition and package metadata. Steps: `zig build` (static library), `zig build test`, `zig build docs`.
   - `.github/workflows/`: CI (`ci.yml`, matrix build+test across OS), Nix checks (`nix-checker.yml`), API docs deployment to GitHub Pages (`deploy-api-docs.yml`), and stale issue/PR handling (`stale-issues-pullrequests.yml`). All workflows run `git lfs pull` before using repo contents.
