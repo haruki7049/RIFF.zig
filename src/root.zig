@@ -224,6 +224,11 @@ pub const WriteError = std.Io.Writer.Error || error{
     /// did not come from `read()` (which is already bounded by the same
     /// limit) - e.g. one built programmatically.
     NestingTooDeep,
+    /// A `.list`/`.riff` container's computed serialized size was odd. Every
+    /// child is padded to an even length and the type FourCC is 4 bytes, so
+    /// this cannot happen unless that size computation is broken; it is
+    /// reported instead of emitting a container whose size field is unpadded.
+    OddContainerSize,
 };
 
 /// Serializes a RIFF chunk to its binary representation and writes it to a writer.
@@ -272,6 +277,8 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///     serialized sub-chunk payload length, does not fit in a `u32` (RIFF size
 ///     fields are 32-bit).
 ///   - `NestingTooDeep`: If `.list`/`.riff` nesting in `chunk` exceeds `max_nesting_depth`.
+///   - `OddContainerSize`: If a `.list`/`.riff` container's computed size is odd. Cannot
+///     happen for a correct size computation; nothing is written for that container.
 pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer) WriteError!void {
     return writeChunk(chunk, allocator, writer, 0);
 }
@@ -313,14 +320,17 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
 fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
     const size = try containerChildrenSize(c.chunks, depth + 1);
 
+    // Every child is already padded to an even length and the type FourCC is
+    // 4 bytes, so a container never needs a pad byte of its own. `size` is a
+    // plain u32 and the type does not guarantee that, so check it before
+    // writing anything rather than emit a container that would need padding.
+    if (size % 2 != 0)
+        return error.OddContainerSize;
+
     try writer.writeAll(id);
     try writer.writeInt(u32, size, .little);
     try writer.writeAll(&c.four_cc.inner);
     for (c.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
-
-    // Every child is already padded to an even length and the type FourCC is
-    // 4 bytes, so a container never needs a pad byte of its own.
-    std.debug.assert(size % 2 == 0);
 }
 
 /// Computes `8 + payload_len` (chunk header) plus the trailing parity pad
