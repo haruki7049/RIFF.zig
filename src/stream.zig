@@ -78,6 +78,11 @@ pub const Options = struct {
     total_len: ?u64 = null,
 };
 
+/// Pull-style RIFF parser: call `next()` repeatedly to get the `Event`s.
+///
+/// Keep the `Iterator` in one place once `dataReader()` has been called: the
+/// reader it returns points into the `Iterator` itself, so moving or copying
+/// the struct while that reader is in use invalidates it.
 pub const Iterator = struct {
     reader: *std.Io.Reader,
     /// See `Options.total_len`.
@@ -247,6 +252,10 @@ pub const Iterator = struct {
 
     /// Returns a reader limited to the current chunk's payload, for
     /// processing it piece by piece. Valid until the next `next()` call.
+    ///
+    /// The returned reader lives inside this `Iterator` (its state is stored
+    /// in `it.limited`), so do not move or copy the `Iterator` while it is in
+    /// use: a copy would leave the reader referring to the original.
     ///
     /// Returns `error.NoPayload` unless the last event was a `.chunk` whose
     /// payload has not been taken yet.
