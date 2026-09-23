@@ -360,6 +360,10 @@ pub const Iterator = struct {
 /// length is known: the declared size is then checked against it up front, so
 /// a truncated input is reported the same way regardless of where it is cut,
 /// and each payload is allocated in one piece.
+///
+/// On success the reader is left right after the top-level chunk's declared
+/// size: neither trailing bytes nor the pad byte of an odd-sized top-level
+/// chunk are consumed (see `riff.read()`, "Reader Position").
 pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: Options) riff.ReadError!Chunk {
     const Frame = struct { kind: Kind, four_cc: FourCC, list: std.array_list.Aligned(Chunk, null) };
 

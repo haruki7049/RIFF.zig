@@ -475,6 +475,15 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 /// or more leftover bytes, or a non-zero one, are `InvalidFormat`. This keeps
 /// truncated or corrupted input from being read as valid.
 ///
+/// ## Reader Position
+///
+/// On success the reader is left right after the top-level chunk's declared
+/// size: `read()` consumes nothing after it, neither trailing bytes nor the
+/// pad byte of an odd-sized top-level chunk (that pad byte is not part of the
+/// declared size, and `write()` does emit it). To read several chunks back to
+/// back from one stream, skip that one pad byte after a top-level chunk whose
+/// payload length is odd before calling `read()` again.
+///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
 ///   - `reader`: The `std.Io.Reader` to read RIFF chunk binary data from.
@@ -1188,6 +1197,57 @@ test "read skips the pad byte after a nested container declared with an odd size
                 inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{expect_nested}, c.chunks),
             }
         }
+    }
+}
+
+test "read leaves the reader right after the declared size, before the pad byte and trailing bytes" {
+    const allocator = std.testing.allocator;
+
+    // Pins read()'s "Reader Position" section. An odd-sized top-level leaf is
+    // followed by its pad byte, which its size field does not count, and then
+    // by more bytes: read() must consume exactly header + declared size, so
+    // the pad byte is still the next byte, and the caller skips it to read the
+    // next chunk from the same stream.
+    const first = "abcd" ++ "\x03\x00\x00\x00" ++ "xyz"; // 11 bytes, odd payload
+    const second = "efgh" ++ "\x02\x00\x00\x00" ++ "BB";
+    const input = first ++ "\x00" ++ second;
+
+    // A fixed reader, so the position can be read off directly.
+    {
+        var reader = std.Io.Reader.fixed(input);
+        const chunk = try read(allocator, &reader);
+        defer chunk.deinit(allocator);
+        try std.testing.expectEqual(first.len, reader.seek);
+        try std.testing.expectEqualSlices(u8, "\x00" ++ second, reader.buffered());
+    }
+
+    // A reader with a tiny buffer: the logical position is the same, and
+    // skipping the one pad byte lets the next read() succeed.
+    {
+        var src = std.Io.Reader.fixed(input);
+        var tiny: [4]u8 = undefined;
+        var limited = src.limited(.unlimited, &tiny);
+        const reader = &limited.interface;
+
+        const one = try read(allocator, reader);
+        defer one.deinit(allocator);
+        try std.testing.expectEqualStrings("xyz", one.chunk.data);
+
+        try std.testing.expectEqual(@as(u8, 0), try reader.takeByte());
+
+        const two = try read(allocator, reader);
+        defer two.deinit(allocator);
+        try std.testing.expectEqualStrings("BB", two.chunk.data);
+    }
+
+    // A top-level container: nothing after its declared size is consumed.
+    {
+        const riff_bytes = "RIFF" ++ "\x0e\x00\x00\x00" ++ "TEST" ++ "even" ++ "\x02\x00\x00\x00" ++ "BB";
+        var reader = std.Io.Reader.fixed(riff_bytes ++ "TRAILING");
+        const chunk = try read(allocator, &reader);
+        defer chunk.deinit(allocator);
+        try std.testing.expectEqual(riff_bytes.len, reader.seek);
+        try std.testing.expectEqualSlices(u8, "TRAILING", reader.buffered());
     }
 }
 
