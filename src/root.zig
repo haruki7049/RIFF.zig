@@ -451,6 +451,20 @@ fn containerChildrenSize(chunks: []const Chunk, depth: usize) error{ PayloadTooL
 /// `stream.readTree()` with `Options.total_len` instead: the declared size is
 /// then checked against it up front.
 ///
+/// ## Padding
+///
+/// A chunk with an odd-sized payload is followed by one pad byte that its size
+/// field does not count. `read()` skips that pad byte without looking at its
+/// value, so a non-zero pad byte is accepted, and it also accepts the pad byte
+/// being absent when the chunk is the last one in its container. The same
+/// applies to the pad after a nested container declared with an odd size.
+/// Pad bytes carry no data and are not preserved: `write()` always emits `0`.
+///
+/// One check is stricter: a single leftover byte at the very end of a
+/// container's children (too short to be a chunk header) must be `0`, and two
+/// or more leftover bytes, or a non-zero one, are `InvalidFormat`. This keeps
+/// truncated or corrupted input from being read as valid.
+///
 /// Parameters:
 ///   - `allocator`: Memory allocator for creating the chunk structure and allocating data buffers.
 ///   - `reader`: The `std.Io.Reader` to read RIFF chunk binary data from.
@@ -1004,6 +1018,62 @@ test "read does not leak a chunk's data if appending it to the list fails" {
         if (read(allocator, &reader)) |chunk| {
             chunk.deinit(allocator);
         } else |_| {}
+    }
+}
+
+test "read ignores the value of the pad byte after an odd-sized chunk, and write emits zero" {
+    const allocator = std.testing.allocator;
+
+    // Pins the documented padding policy (see read()'s "Padding" section): the
+    // pad byte after an odd-sized leaf is skipped without checking its value,
+    // and may be absent when the leaf is the last chunk of its container. Only
+    // a lone leftover byte at the end of a container must be zero (covered by
+    // the test below).
+    const odd = "odd1" ++ "\x01\x00\x00\x00" ++ "A";
+    const even = "even" ++ "\x02\x00\x00\x00" ++ "BB";
+    const expect_odd = Chunk{ .chunk = .{ .four_cc = try FourCC.new("odd1"), .data = "A" } };
+    const expect_even = Chunk{ .chunk = .{ .four_cc = try FourCC.new("even"), .data = "BB" } };
+
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        {
+            // Non-zero pad byte followed by a sibling: accepted, and the
+            // sibling is not desynced by it. Re-written with a zero pad.
+            const buffer = id ++ "\x18\x00\x00\x00" ++ "TEST" ++ odd ++ "\xff" ++ even;
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+            switch (parsed) {
+                .chunk => return error.TestUnexpectedResult,
+                inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{ expect_odd, expect_even }, c.chunks),
+            }
+
+            var w = std.Io.Writer.Allocating.init(allocator);
+            defer w.deinit();
+            try write(parsed, allocator, &w.writer);
+            try std.testing.expectEqualSlices(u8, id ++ "\x18\x00\x00\x00" ++ "TEST" ++ odd ++ "\x00" ++ even, w.written());
+        }
+        {
+            // Non-zero pad byte after the last chunk of the container.
+            const buffer = id ++ "\x0e\x00\x00\x00" ++ "TEST" ++ odd ++ "\xff";
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+            switch (parsed) {
+                .chunk => return error.TestUnexpectedResult,
+                inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{expect_odd}, c.chunks),
+            }
+        }
+        {
+            // Pad byte absent after the last chunk of the container.
+            const buffer = id ++ "\x0d\x00\x00\x00" ++ "TEST" ++ odd;
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+            switch (parsed) {
+                .chunk => return error.TestUnexpectedResult,
+                inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{expect_odd}, c.chunks),
+            }
+        }
     }
 }
 
