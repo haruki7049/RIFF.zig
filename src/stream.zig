@@ -69,7 +69,8 @@ pub const Options = struct {
     /// if known (e.g. a file's size, or a fixed buffer's length).
     ///
     /// When set, the top-level chunk's declared size is checked against it
-    /// before anything is read or allocated, so every nested size is
+    /// right after its header is read, before any payload is read or
+    /// allocated, so every nested size is
     /// bounded by real input and `readDataAlloc()` can allocate each payload
     /// in one piece. If the input turns out shorter than `total_len`, reads
     /// still fail with `SizeMismatch`; only the allocation sizes trust it.
