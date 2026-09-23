@@ -49,11 +49,9 @@ The following example demonstrates how to create and serialize a WAVE file struc
 const std = @import("std");
 const riff = @import("riff_zig");
 
-pub fn main() !void {
-    // Initialize a General Purpose Allocator
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
     // Define a WAVE file structure using RIFF chunks
     const wave_chunk = riff.Chunk{ .riff = .{
@@ -64,17 +62,18 @@ pub fn main() !void {
             // Define a data chunk
             .{ .chunk = .{ .four_cc = try riff.FourCC.new("data"), .data = "audio_data" } },
         },
-    }};
+    } };
 
     // Create an output file
-    const file = try std.fs.cwd().createFile("output.wav", .{});
-    defer file.close();
-    const buf = try allocator.alloc(u8, 10 * 1024 * 1024); // For now I define this buffer size
-    defer allocator.free(buf);
-    var writer = file.writer(buf);
+    const file = try std.Io.Dir.cwd().createFile(io, "output.wav", .{});
+    defer file.close(io);
 
-    // Serialize the chunk structure to the file
-    try riff.write(wave_chunk, allocator, &writer.interface);
+    // write() takes a *std.Io.Writer: wrap the file in a buffered File.Writer,
+    // pass its `.interface`, then flush so the buffered bytes reach the file.
+    var buffer: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    try riff.write(wave_chunk, allocator, &file_writer.interface);
+    try file_writer.interface.flush();
 }
 ```
 
@@ -121,6 +120,8 @@ needs) in a function passed to `io.async()`.
 - `riff.read(allocator, reader)`: Parses a RIFF chunk from a binary stream.
 - `riff.write(chunk, allocator, writer)`: Serializes a chunk to binary format.
 - `Chunk.deinit(allocator)`: Recursively frees memory allocated for a chunk.
+- `riff.stream.readTree(allocator, reader, options)`: Builds the chunk tree that `riff.read()` returns. Pass `Options.total_len` when the input length is known to have the declared size checked up front.
+- `riff.stream.Iterator`: A pull-style streaming parser. `Iterator.init(reader, options)` and `next()` yield one event per chunk header, and a chunk's payload is read only on request (`data()`, `readDataAlloc()`, `dataReader()`), so large files need not be loaded into memory.
 
 ## License
 
