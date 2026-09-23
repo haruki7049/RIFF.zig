@@ -378,7 +378,10 @@ pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: O
     unreachable; // the first event always opens or is the top-level chunk
 }
 
-fn isContainer(id: *const [4]u8) bool {
+/// Whether a chunk with this id is a container ("RIFF" or "LIST") rather than a
+/// leaf. The parser and `riff.write()` (which rejects a leaf with such an id)
+/// both use this, so they cannot disagree about which ids are reserved.
+pub fn isContainer(id: *const [4]u8) bool {
     return std.mem.eql(u8, id, "RIFF") or std.mem.eql(u8, id, "LIST");
 }
 
