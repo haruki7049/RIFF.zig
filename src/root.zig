@@ -1149,6 +1149,48 @@ test "read ignores the value of the pad byte after an odd-sized chunk, and write
     }
 }
 
+test "read skips the pad byte after a nested container declared with an odd size" {
+    const allocator = std.testing.allocator;
+
+    // Pins the "Padding" section of read()'s doc for a nested container. The
+    // nested LIST's declared size is odd (type FourCC 4 + an odd-sized leaf 9
+    // = 13), so a pad byte follows it. It is skipped without checking its
+    // value, may be absent when the container is the last child, and the
+    // sibling after it is not desynced.
+    const nested = "LIST" ++ "\x0d\x00\x00\x00" ++ "SUB1" ++ "odd1" ++ "\x01\x00\x00\x00" ++ "A";
+    const even = "even" ++ "\x02\x00\x00\x00" ++ "BB";
+    const expect_nested = Chunk{ .list = .{
+        .four_cc = try FourCC.new("SUB1"),
+        .chunks = &.{.{ .chunk = .{ .four_cc = try FourCC.new("odd1"), .data = "A" } }},
+    } };
+    const expect_even = Chunk{ .chunk = .{ .four_cc = try FourCC.new("even"), .data = "BB" } };
+
+    inline for (.{ "RIFF", "LIST" }) |id| {
+        inline for (.{ "\x00", "\xff" }) |pad| {
+            // Pad byte (zero or not) between the nested container and a sibling.
+            const buffer = id ++ "\x24\x00\x00\x00" ++ "TEST" ++ nested ++ pad ++ even;
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+            switch (parsed) {
+                .chunk => return error.TestUnexpectedResult,
+                inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{ expect_nested, expect_even }, c.chunks),
+            }
+        }
+        {
+            // Pad byte absent after the last child.
+            const buffer = id ++ "\x19\x00\x00\x00" ++ "TEST" ++ nested;
+            var reader = std.Io.Reader.fixed(buffer);
+            const parsed = try read(allocator, &reader);
+            defer parsed.deinit(allocator);
+            switch (parsed) {
+                .chunk => return error.TestUnexpectedResult,
+                inline .list, .riff => |c| try std.testing.expectEqualDeep(&[_]Chunk{expect_nested}, c.chunks),
+            }
+        }
+    }
+}
+
 test "read accepts exactly one trailing zero pad byte inside a container but rejects more" {
     const allocator = std.testing.allocator;
 
