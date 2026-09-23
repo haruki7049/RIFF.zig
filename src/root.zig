@@ -199,8 +199,9 @@ pub const Chunk = union(enum) {
 /// returns can always be passed back to `write()`.
 pub const max_nesting_depth: usize = 64;
 
-/// Error types that can occur during RIFF chunk parsing.
-pub const ToChunkListError = error{
+/// Errors describing malformed RIFF input, shared by `ReadError` and
+/// `stream.Error`.
+pub const FormatError = error{
     /// The input data does not conform to the expected RIFF format structure.
     /// This can happen if chunk headers are incomplete or malformed.
     InvalidFormat,
@@ -212,7 +213,7 @@ pub const ToChunkListError = error{
 };
 
 /// Error type returned by `read()`.
-pub const ReadError = ToChunkListError || std.mem.Allocator.Error || FourCC.NewError || error{
+pub const ReadError = FormatError || std.mem.Allocator.Error || FourCC.NewError || error{
     /// The underlying reader failed (an I/O error, not a problem with the RIFF data).
     ReadFailed,
 };

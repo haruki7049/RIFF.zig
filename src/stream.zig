@@ -14,7 +14,7 @@ const FourCC = riff.FourCC;
 const Chunk = riff.Chunk;
 const max_nesting_depth = riff.max_nesting_depth;
 
-pub const Error = riff.ToChunkListError || FourCC.NewError || error{
+pub const Error = riff.FormatError || FourCC.NewError || error{
     /// The underlying reader failed (I/O error).
     ReadFailed,
 };
@@ -496,7 +496,7 @@ fn referenceRead(allocator: std.mem.Allocator, reader: *std.Io.Reader) riff.Read
     }
 }
 
-fn referenceToChunkList(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) (riff.ToChunkListError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
+fn referenceToChunkList(allocator: std.mem.Allocator, bytes: []const u8, depth: usize) (riff.FormatError || std.mem.Allocator.Error || FourCC.NewError)![]const Chunk {
     if (depth > max_nesting_depth)
         return error.NestingTooDeep;
 
