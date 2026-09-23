@@ -254,7 +254,8 @@ pub const WriteError = std.Io.Writer.Error || error{
 ///
 /// - **LIST chunk (.list)**:
 ///   - "LIST" identifier (4 bytes)
-///   - Data size (4 bytes, little-endian u32) - size of all serialized sub-chunks only
+///   - Data size (4 bytes, little-endian u32) - size of FourCC (4) + all serialized sub-chunks
+///   - List type FourCC (4 bytes, e.g., "INFO")
 ///   - Serialized sub-chunks (variable length)
 ///
 /// - **RIFF chunk (.riff)**:
@@ -269,7 +270,10 @@ pub const WriteError = std.Io.Writer.Error || error{
 /// each `.list`/`.riff` container's total serialized size with a pure,
 /// allocation-free walk of the tree (`containerChildrenSize`), then it
 /// streams the header and children directly to `writer`. No intermediate
-/// buffer is built, so nested containers are not copied once per level.
+/// buffer is built, so nested containers are not copied once per level. The
+/// size walk is repeated for each nested container's own size field, so a
+/// chunk is measured once per container that encloses it; the cost is
+/// bounded by `max_nesting_depth`.
 ///
 /// Parameters:
 ///   - `chunk`: The RIFF chunk to serialize (can be `.chunk`, `.list`, or `.riff` variant).
