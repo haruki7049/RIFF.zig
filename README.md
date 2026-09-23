@@ -122,6 +122,12 @@ needs) in a function passed to `io.async()`.
 - `riff.stream.readTree(allocator, reader, options)`: Builds the chunk tree that `riff.read()` returns. Pass `Options.total_len` when the input length is known to have the declared size checked up front.
 - `riff.stream.Iterator`: A pull-style streaming parser. `Iterator.init(reader, options)` and `next()` yield one event per chunk header, and a chunk's payload is read only on request (`data()`, `readDataAlloc()`, `dataReader()`), so large files need not be loaded into memory.
 
+## Compatibility
+
+This library follows [Semantic Versioning](https://semver.org/). The public API, including the `riff.stream` module, is covered by it.
+
+Adding a member to an error set (`ReadError`, `WriteError`, `FormatError`, `FourCC.NewError` and the error sets of `riff.stream`) is a **minor** change, not a breaking one. Keep an `else` prong in a `switch` over these errors, so that new members do not stop your code from compiling.
+
 ## License
 
 This project is dual-licensed under the **MIT License** and **Apache License 2.0**.
