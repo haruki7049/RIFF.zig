@@ -23,6 +23,18 @@ pub const Error = riff.ToChunkListError || FourCC.NewError || error{
 pub const DataError = Error || error{
     /// `data()` was called on a chunk larger than the reader's buffer.
     BufferTooSmall,
+} || BorrowError;
+
+/// Errors of `Iterator.data()`/`Iterator.dataReader()` relating to reentrancy.
+pub const BorrowError = error{
+    /// `data()` or `dataReader()` was called while a `dataReader()` sub-reader
+    /// obtained from this same `Iterator` is still open (its payload has not
+    /// been fully consumed and `next()` has not been called since). Checked
+    /// in every build mode, unlike a `std.debug.assert`, since silently
+    /// reading from both the sub-reader and `Iterator` at once would corrupt
+    /// `Iterator`'s position accounting instead of merely misbehaving in a
+    /// debug build.
+    AlreadyBorrowed,
 };
 
 /// Growth increment `Iterator.readDataAlloc()` uses when a payload is not
@@ -146,7 +158,7 @@ pub const Iterator = struct {
     /// Borrows the whole payload of the current chunk from the reader's
     /// buffer. Valid until the next call on this iterator.
     pub fn data(it: *Iterator) DataError![]const u8 {
-        std.debug.assert(it.limited == null);
+        if (it.limited != null) return error.AlreadyBorrowed;
         const n: usize = @intCast(it.pending);
         if (n > it.reader.buffer.len) return error.BufferTooSmall;
         const s = it.reader.take(n) catch |e| return mapPayload(e);
@@ -165,6 +177,11 @@ pub const Iterator = struct {
     /// than it really contained. With `total_len`, the size was already
     /// checked against it, so the payload is allocated in one piece.
     pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || std.mem.Allocator.Error)![]u8 {
+        // Not converted to a typed BorrowError like data()/dataReader(): doing
+        // so would widen this error set with a variant readTree() (whose
+        // return type is the fixed riff.ReadError) can never actually produce,
+        // since it always calls this with a fresh Iterator that never had
+        // dataReader() called on it.
         std.debug.assert(it.limited == null);
         const n: usize = @intCast(it.pending);
 
@@ -190,8 +207,8 @@ pub const Iterator = struct {
 
     /// Returns a reader limited to the current chunk's payload, for
     /// processing it piece by piece. Valid until the next `next()` call.
-    pub fn dataReader(it: *Iterator, buffer: []u8) *std.Io.Reader {
-        std.debug.assert(it.limited == null);
+    pub fn dataReader(it: *Iterator, buffer: []u8) BorrowError!*std.Io.Reader {
+        if (it.limited != null) return error.AlreadyBorrowed;
         it.limited = it.reader.limited(.limited(@intCast(it.pending)), buffer);
         return &it.limited.?.interface;
     }
@@ -547,7 +564,7 @@ test "stream: skip everything but one chunk, streamed in 256-byte pieces" {
             chunks += 1;
             if (std.mem.eql(u8, &c.four_cc.inner, "shdr")) {
                 var piece: [256]u8 = undefined;
-                const dr = it.dataReader(&piece);
+                const dr = try it.dataReader(&piece);
                 while (true) {
                     const got = dr.peekGreedy(1) catch |e| switch (e) {
                         error.EndOfStream => break,
@@ -666,4 +683,20 @@ test "stream: readTree never leaks on allocation failure" {
             c.deinit(a);
         }
     }.f, .{@as([]const u8, @embedFile("assets/riff-files/riff_chunk_has_list.riff"))});
+}
+
+test "stream: data()/dataReader() return AlreadyBorrowed while a dataReader() sub-reader is still open" {
+    const buffer = "data" ++ "\x02\x00\x00\x00" ++ "AB";
+
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+    _ = (try it.next()).?;
+
+    var piece: [8]u8 = undefined;
+    _ = try it.dataReader(&piece);
+
+    // Neither data() nor a second dataReader() may borrow again until the
+    // first sub-reader has been retired via next().
+    try testing.expectError(error.AlreadyBorrowed, it.data());
+    try testing.expectError(error.AlreadyBorrowed, it.dataReader(&piece));
 }
