@@ -25,15 +25,16 @@ pub const DataError = Error || AccessError || error{
     BufferTooSmall,
 };
 
-/// Errors of `Iterator.data()`/`Iterator.dataReader()` relating to reentrancy.
+/// Errors of `Iterator.data()`/`readDataAlloc()`/`dataReader()` relating to reentrancy.
 pub const BorrowError = error{
-    /// `data()` or `dataReader()` was called while a `dataReader()` sub-reader
-    /// obtained from this same `Iterator` is still open (its payload has not
-    /// been fully consumed and `next()` has not been called since). Checked
-    /// in every build mode, unlike a `std.debug.assert`, since silently
+    /// `data()`, `readDataAlloc()` or `dataReader()` was called while a
+    /// `dataReader()` sub-reader obtained from this same `Iterator` is still
+    /// borrowed. The sub-reader stays borrowed from the `dataReader()` call
+    /// until the next `next()` call, whether or not it was read to the end.
+    /// Checked in every build mode, unlike a `std.debug.assert`, since silently
     /// reading from both the sub-reader and `Iterator` at once would corrupt
     /// `Iterator`'s position accounting instead of merely misbehaving in a
-    /// debug build.
+    /// debug build. Takes precedence over `NoPayload`.
     AlreadyBorrowed,
 };
 
@@ -979,6 +980,26 @@ test "stream: data()/dataReader() return AlreadyBorrowed while a dataReader() su
     // first sub-reader has been retired via next().
     try testing.expectError(error.AlreadyBorrowed, it.data());
     try testing.expectError(error.AlreadyBorrowed, it.dataReader(&piece));
+}
+
+test "stream: a dataReader() stays borrowed after it was read to the end, until the next next()" {
+    // Pins the documented rule: AlreadyBorrowed is about the sub-reader still
+    // being borrowed (from dataReader() until the next next()), not about
+    // whether its payload has been consumed.
+    var r: std.Io.Reader = .fixed("data" ++ "\x02\x00\x00\x00" ++ "AB");
+    var it = Iterator.init(&r, .{});
+    _ = (try it.next()).?;
+
+    var piece: [4]u8 = undefined;
+    const dr = try it.dataReader(&piece);
+    try testing.expectEqualStrings("AB", try dr.take(2));
+
+    try testing.expectError(error.AlreadyBorrowed, it.data());
+    try testing.expectError(error.AlreadyBorrowed, it.readDataAlloc(testing.allocator));
+    try testing.expectError(error.AlreadyBorrowed, it.dataReader(&piece));
+
+    // next() retires the sub-reader.
+    try testing.expectEqual(null, try it.next());
 }
 
 test "stream: next() keeps returning the same error after a failed first call instead of null" {
