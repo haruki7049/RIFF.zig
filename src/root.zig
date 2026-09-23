@@ -96,6 +96,18 @@ pub const FourCC = struct {
     }
 };
 
+/// Shared payload of `Chunk`'s `.list` and `.riff` variants: a type FourCC
+/// followed by the container's sub-chunks. Naming this type (rather than
+/// leaving `.list`/`.riff` as two separately-declared but field-identical
+/// anonymous structs) gives them the same type, so `switch` prongs over
+/// `Chunk` can merge `.list`/`.riff` into a single capture - their handling
+/// is (and should be) identical apart from which literal FourCC ("LIST" vs
+/// "RIFF") gets written/matched.
+pub const Container = struct {
+    four_cc: FourCC,
+    chunks: []const Chunk,
+};
+
 /// Represents a RIFF (Resource Interchange File Format) chunk.
 /// Models the three types of chunks that can appear in RIFF files:
 ///
@@ -125,25 +137,18 @@ pub const Chunk = union(enum) {
     /// A LIST chunk containing a type identifier and a list of sub-chunks.
     /// LIST chunks are used to group multiple chunks together under a named type
     /// (e.g., "INFO" for metadata, "sdta" for sample data in SoundFont files).
-    list: struct {
-        four_cc: FourCC,
-        chunks: []const Chunk,
-    },
+    list: Container,
     /// A RIFF chunk representing the root container of a RIFF file.
     /// The `four_cc` specifies the file type (e.g., "WAVE" for audio files).
     /// The `chunks` field contains all sub-chunks within this RIFF container.
-    riff: struct {
-        four_cc: FourCC,
-        chunks: []const Chunk,
-    },
+    riff: Container,
 
     /// Deallocates memory for this chunk and all of its children recursively.
     /// This method should be called when you're done using a chunk that was
     /// created by `read()` or manually allocated with an allocator.
     ///
-    /// For `.chunk` variants: Frees the data buffer.
-    /// For `.list` variants: Recursively frees all child chunks, then the chunks array.
-    /// For `.riff` variants: Recursively frees all child chunks, then the chunks array.
+    /// For `.chunk` variants: frees the data buffer. For `.list`/`.riff`
+    /// variants: recursively frees all child chunks, then the chunks array.
     ///
     /// `deinit()` recurses once per `.list`/`.riff` nesting level with no
     /// depth limit of its own (unlike `read()`/`write()`, which are both
@@ -158,13 +163,9 @@ pub const Chunk = union(enum) {
     pub fn deinit(self: Chunk, allocator: std.mem.Allocator) void {
         switch (self) {
             .chunk => |b| allocator.free(b.data),
-            .list => |l| {
-                for (l.chunks) |child| child.deinit(allocator);
-                allocator.free(l.chunks);
-            },
-            .riff => |r| {
-                for (r.chunks) |child| child.deinit(allocator);
-                allocator.free(r.chunks);
+            .list, .riff => |c| {
+                for (c.chunks) |child| child.deinit(allocator);
+                allocator.free(c.chunks);
             },
         }
     }
@@ -281,32 +282,28 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
                 try writer.writeByte(0);
             }
         },
-        .list => |l| {
-            const size = try container_children_size(l.chunks, depth + 1);
-
-            try writer.writeAll("LIST");
-            try writer.writeInt(u32, size, .little);
-            try writer.writeAll(&l.four_cc.inner);
-            for (l.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
-
-            // Add padding byte if total data size is odd
-            if (size % 2 == 1) {
-                try writer.writeByte(0);
-            }
+        .list, .riff => |c, tag| {
+            const id = if (tag == .list) "LIST" else "RIFF";
+            try writeContainer(id, c, allocator, writer, depth);
         },
-        .riff => |r| {
-            const size = try container_children_size(r.chunks, depth + 1);
+    }
+}
 
-            try writer.writeAll("RIFF");
-            try writer.writeInt(u32, size, .little);
-            try writer.writeAll(&r.four_cc.inner);
-            for (r.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
+/// Shared body of `writeChunk()`'s `.list`/`.riff` branches: writes `id`
+/// ("LIST" or "RIFF"), the container's total size, its type FourCC, then
+/// streams each child directly to `writer` - see `write()`'s doc comment
+/// for why this needs no intermediate buffer.
+fn writeContainer(id: *const [4]u8, c: Container, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
+    const size = try container_children_size(c.chunks, depth + 1);
 
-            // Add padding byte if total data size is odd
-            if (size % 2 == 1) {
-                try writer.writeByte(0);
-            }
-        },
+    try writer.writeAll(id);
+    try writer.writeInt(u32, size, .little);
+    try writer.writeAll(&c.four_cc.inner);
+    for (c.chunks) |child| try writeChunk(child, allocator, writer, depth + 1);
+
+    // Add padding byte if total data size is odd
+    if (size % 2 == 1) {
+        try writer.writeByte(0);
     }
 }
 
@@ -341,8 +338,7 @@ fn serialized_size(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTo
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
             break :blk try chunkTotalSize(data_size);
         },
-        .list => |l| try chunkTotalSize(try container_children_size(l.chunks, depth + 1)),
-        .riff => |r| try chunkTotalSize(try container_children_size(r.chunks, depth + 1)),
+        .list, .riff => |c| try chunkTotalSize(try container_children_size(c.chunks, depth + 1)),
     };
 }
 
@@ -433,7 +429,9 @@ pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chun
     const id = buffer[0..four_cc_len];
     const size = std.mem.readInt(u32, buffer[four_cc_len..header_len], .little);
 
-    if (std.mem.eql(u8, id, "RIFF")) {
+    const is_riff = std.mem.eql(u8, id, "RIFF");
+    const is_list = std.mem.eql(u8, id, "LIST");
+    if (is_riff or is_list) {
         if (buffer.len < container_header_len or size < four_cc_len)
             return error.InvalidFormat;
 
@@ -446,18 +444,8 @@ pub fn read(allocator: std.mem.Allocator, reader: *std.Io.Reader) ReadError!Chun
 
         const four_cc = buffer[header_len..container_header_len];
         const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end], 0);
-        return Chunk{ .riff = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
-    } else if (std.mem.eql(u8, id, "LIST")) {
-        if (buffer.len < container_header_len or size < four_cc_len)
-            return error.InvalidFormat;
-
-        const data_end: usize = header_len + @as(usize, size);
-        if (buffer.len < data_end)
-            return error.SizeMismatch;
-
-        const four_cc = buffer[header_len..container_header_len];
-        const chunks = try to_chunk_list(allocator, buffer[container_header_len..data_end], 0);
-        return Chunk{ .list = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks } };
+        const container: Container = .{ .four_cc = try FourCC.new(four_cc), .chunks = chunks };
+        return if (is_riff) Chunk{ .riff = container } else Chunk{ .list = container };
     } else {
         const data_end: usize = header_len + @as(usize, size);
 
