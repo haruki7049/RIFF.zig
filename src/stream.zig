@@ -685,6 +685,53 @@ test "stream: readTree never leaks on allocation failure" {
     }.f, .{@as([]const u8, @embedFile("assets/riff-files/riff_chunk_has_list.riff"))});
 }
 
+test "stream: data() returns BufferTooSmall when the chunk is larger than the reader's buffer" {
+    const buffer = "data" ++ "\x08\x00\x00\x00" ++ "ABCDEFGH";
+
+    var src: std.Io.Reader = .fixed(buffer);
+    var tiny: [4]u8 = undefined; // smaller than the 8-byte payload
+    var small = src.limited(.unlimited, &tiny);
+    var it = Iterator.init(&small.interface, .{});
+
+    const ev = (try it.next()).?;
+    try testing.expectEqualStrings("data", &ev.chunk.four_cc.inner);
+    try testing.expectError(error.BufferTooSmall, it.data());
+}
+
+test "stream: next() skips a dataReader()'s unconsumed remainder instead of desyncing" {
+    // Regression test: finishCurrent() must account for bytes a dataReader()
+    // sub-reader pulled into its own buffer but the caller never read, not
+    // just the bytes never pulled from the underlying reader at all -
+    // otherwise the next sibling's header is parsed from the wrong offset.
+    const child1 = "aaaa" ++ "\x04\x00\x00\x00" ++ "WXYZ";
+    const child2 = "bbbb" ++ "\x04\x00\x00\x00" ++ "1234";
+    const buffer = "RIFF" ++ "\x1c\x00\x00\x00" ++ "TEST" ++ child1 ++ child2;
+
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+
+    const e1 = (try it.next()).?;
+    try testing.expectEqual(Kind.riff, e1.begin_container.kind);
+
+    const e2 = (try it.next()).?;
+    try testing.expectEqualStrings("aaaa", &e2.chunk.four_cc.inner);
+
+    // Read only the first byte of "aaaa"'s 4-byte payload through a
+    // dataReader(), leaving the other 3 bytes (plus whatever the sub-reader
+    // over-buffered) undrained.
+    var piece: [2]u8 = undefined;
+    const dr = try it.dataReader(&piece);
+    const got = try dr.peekGreedy(1);
+    dr.toss(got.len);
+
+    const e3 = (try it.next()).?;
+    try testing.expectEqualStrings("bbbb", &e3.chunk.four_cc.inner);
+    try testing.expectEqualStrings("1234", try it.data());
+
+    try testing.expectEqual(Kind.riff, (try it.next()).?.end_container);
+    try testing.expectEqual(null, try it.next());
+}
+
 test "stream: data()/dataReader() return AlreadyBorrowed while a dataReader() sub-reader is still open" {
     const buffer = "data" ++ "\x02\x00\x00\x00" ++ "AB";
 
