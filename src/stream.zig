@@ -196,13 +196,11 @@ pub const Iterator = struct {
     /// truncated input fails with `SizeMismatch` after allocating no more
     /// than it really contained. With `total_len`, the size was already
     /// checked against it, so the payload is allocated in one piece.
-    pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || std.mem.Allocator.Error)![]u8 {
-        // Not converted to a typed BorrowError like data()/dataReader(): doing
-        // so would widen this error set with a variant readTree() (whose
-        // return type is the fixed riff.ReadError) can never actually produce,
-        // since it always calls this with a fresh Iterator that never had
-        // dataReader() called on it.
-        std.debug.assert(it.limited == null);
+    ///
+    /// Returns `error.AlreadyBorrowed` if a `dataReader()` sub-reader is
+    /// still open, like `data()` and `dataReader()` do.
+    pub fn readDataAlloc(it: *Iterator, allocator: std.mem.Allocator) (Error || BorrowError || std.mem.Allocator.Error)![]u8 {
+        if (it.limited != null) return error.AlreadyBorrowed;
         const n: usize = @intCast(it.pending);
 
         if (it.total_len != null or it.reader.bufferedLen() >= n) {
@@ -321,7 +319,11 @@ pub fn readTree(allocator: std.mem.Allocator, reader: *std.Io.Reader, options: O
             n += 1;
         },
         .chunk => |c| {
-            const d = try it.readDataAlloc(allocator);
+            // readTree() never calls dataReader(), so no sub-reader is open.
+            const d = it.readDataAlloc(allocator) catch |e| switch (e) {
+                error.AlreadyBorrowed => unreachable,
+                else => |other| return other,
+            };
             const ch: Chunk = .{ .chunk = .{ .four_cc = c.four_cc, .data = d } };
             if (n == 0) return ch;
             frames[n - 1].list.append(allocator, ch) catch |e| {
@@ -750,6 +752,21 @@ test "stream: next() skips a dataReader()'s unconsumed remainder instead of desy
 
     try testing.expectEqual(Kind.riff, (try it.next()).?.end_container);
     try testing.expectEqual(null, try it.next());
+}
+
+test "stream: readDataAlloc() returns AlreadyBorrowed while a dataReader() sub-reader is still open" {
+    const buffer = "data" ++ "\x02\x00\x00\x00" ++ "AB";
+
+    var r: std.Io.Reader = .fixed(buffer);
+    var it = Iterator.init(&r, .{});
+    _ = (try it.next()).?;
+
+    var piece: [8]u8 = undefined;
+    _ = try it.dataReader(&piece);
+
+    // Checked in every build mode, not just Debug: reading through both the
+    // sub-reader and readDataAlloc() would corrupt position accounting.
+    try testing.expectError(error.AlreadyBorrowed, it.readDataAlloc(testing.allocator));
 }
 
 test "stream: data()/dataReader() return AlreadyBorrowed while a dataReader() sub-reader is still open" {
