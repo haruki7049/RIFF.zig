@@ -50,7 +50,6 @@ const std = @import("std");
 const riff = @import("riff_zig");
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
     const io = init.io;
 
     // Define a WAVE file structure using RIFF chunks
@@ -72,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
     // pass its `.interface`, then flush so the buffered bytes reach the file.
     var buffer: [4096]u8 = undefined;
     var file_writer = file.writer(io, &buffer);
-    try riff.write(wave_chunk, allocator, &file_writer.interface);
+    try riff.write(wave_chunk, &file_writer.interface);
     try file_writer.interface.flush();
 }
 ```
@@ -118,7 +117,7 @@ needs) in a function passed to `io.async()`.
 ## API Overview
 
 - `riff.read(allocator, reader)`: Parses a RIFF chunk from a binary stream.
-- `riff.write(chunk, allocator, writer)`: Serializes a chunk to binary format.
+- `riff.write(chunk, writer)`: Serializes a chunk to binary format.
 - `Chunk.deinit(allocator)`: Recursively frees memory allocated for a chunk.
 - `riff.stream.readTree(allocator, reader, options)`: Builds the chunk tree that `riff.read()` returns. Pass `Options.total_len` when the input length is known to have the declared size checked up front.
 - `riff.stream.Iterator`: A pull-style streaming parser. `Iterator.init(reader, options)` and `next()` yield one event per chunk header, and a chunk's payload is read only on request (`data()`, `readDataAlloc()`, `dataReader()`), so large files need not be loaded into memory.
