@@ -518,6 +518,9 @@ test "chunk serialization" {
 }
 
 test "write returns PayloadTooLarge instead of panicking for oversized chunk data" {
+    // A slice longer than maxInt(u32) cannot exist where usize is 32 bits.
+    if (@sizeOf(usize) <= 4) return error.SkipZigTest;
+
     const allocator = std.testing.allocator;
 
     // Regression test: build a slice whose length exceeds u32 max without
