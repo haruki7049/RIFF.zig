@@ -187,6 +187,12 @@ pub const Chunk = union(enum) {
 /// (not from `read()`, which is already bounded) on the write side -
 /// neither would otherwise recurse without bound. See also `Chunk.deinit()`,
 /// which has no enforced bound of its own.
+///
+/// Only containers are counted, and the top-level chunk is at depth 0, so
+/// `read()` and `write()` both accept up to `max_nesting_depth + 1` containers
+/// along any path, with any leaf chunks inside the innermost one. Leaf chunks
+/// have no depth limit of their own on either side, so whatever `read()`
+/// returns can always be passed back to `write()`.
 pub const max_nesting_depth: usize = 64;
 
 /// Error types that can occur during RIFF chunk parsing.
@@ -277,9 +283,6 @@ pub fn write(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer)
 /// `read()`, so nothing else stops a deeply nested tree built some other way
 /// from overflowing the stack here.
 fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer, depth: usize) WriteError!void {
-    if (depth > max_nesting_depth)
-        return error.NestingTooDeep;
-
     switch (chunk) {
         .chunk => |b| {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
@@ -294,6 +297,9 @@ fn writeChunk(chunk: Chunk, allocator: std.mem.Allocator, writer: *std.Io.Writer
             }
         },
         .list, .riff => |c, tag| {
+            if (depth > max_nesting_depth)
+                return error.NestingTooDeep;
+
             const id = if (tag == .list) "LIST" else "RIFF";
             try writeContainer(id, c, allocator, writer, depth);
         },
@@ -341,15 +347,16 @@ fn chunkTotalSize(payload_len: u32) error{PayloadTooLarge}!usize {
 /// nested `Chunk` tree could overflow the stack here just as it could in
 /// `writeChunk()`.
 fn serializedSize(chunk: Chunk, depth: usize) error{ PayloadTooLarge, NestingTooDeep }!usize {
-    if (depth > max_nesting_depth)
-        return error.NestingTooDeep;
-
     return switch (chunk) {
         .chunk => |b| blk: {
             const data_size = std.math.cast(u32, b.data.len) orelse return error.PayloadTooLarge;
             break :blk try chunkTotalSize(data_size);
         },
-        .list, .riff => |c| try chunkTotalSize(try containerChildrenSize(c.chunks, depth + 1)),
+        .list, .riff => |c| blk: {
+            if (depth > max_nesting_depth)
+                return error.NestingTooDeep;
+            break :blk try chunkTotalSize(try containerChildrenSize(c.chunks, depth + 1));
+        },
     };
 }
 
@@ -527,6 +534,54 @@ test "write returns NestingTooDeep instead of overflowing the stack for excessiv
     var w = std.Io.Writer.Allocating.init(allocator);
     defer w.deinit();
     try std.testing.expectError(error.NestingTooDeep, write(chunk, allocator, &w.writer));
+}
+
+/// Builds `containers` nested containers as raw bytes: an outermost "RIFF",
+/// then "LIST"s, with an empty "data" leaf inside the innermost one.
+fn buildNestedContainers(allocator: std.mem.Allocator, containers: usize) ![]u8 {
+    var prev = try allocator.dupe(u8, "data" ++ "\x00\x00\x00\x00");
+    errdefer allocator.free(prev);
+
+    var i: usize = 0;
+    while (i < containers) : (i += 1) {
+        const wrapped = try allocator.alloc(u8, 12 + prev.len);
+        @memcpy(wrapped[0..4], if (i == containers - 1) "RIFF" else "LIST");
+        std.mem.writeInt(u32, wrapped[4..8], @intCast(4 + prev.len), .little);
+        @memcpy(wrapped[8..12], "TEST");
+        @memcpy(wrapped[12..], prev);
+        allocator.free(prev);
+        prev = wrapped;
+    }
+    return prev;
+}
+
+test "read() and write() accept the same nesting depth: a tree read() returns can always be written back" {
+    const allocator = std.testing.allocator;
+
+    // Regression test: read() only checked depth when opening a container,
+    // while write() checked every node, leaves included. A leaf inside a
+    // container at the deepest depth read() accepts was therefore rejected by
+    // write() with NestingTooDeep, so write(read(x)) failed for input that
+    // read() had accepted. Both must accept up to max_nesting_depth + 1
+    // containers (the top-level one is at depth 0), and reject one more.
+    inline for (.{ max_nesting_depth, max_nesting_depth + 1 }) |containers| {
+        const bytes = try buildNestedContainers(allocator, containers);
+        defer allocator.free(bytes);
+
+        var reader = std.Io.Reader.fixed(bytes);
+        const parsed = try read(allocator, &reader);
+        defer parsed.deinit(allocator);
+
+        var w = std.Io.Writer.Allocating.init(allocator);
+        defer w.deinit();
+        try write(parsed, allocator, &w.writer);
+        try std.testing.expectEqualSlices(u8, bytes, w.written());
+    }
+
+    const too_deep = try buildNestedContainers(allocator, max_nesting_depth + 2);
+    defer allocator.free(too_deep);
+    var reader = std.Io.Reader.fixed(too_deep);
+    try std.testing.expectError(error.NestingTooDeep, read(allocator, &reader));
 }
 
 test "write performs no allocation for nested .list/.riff containers" {
