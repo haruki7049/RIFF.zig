@@ -64,6 +64,13 @@
 
 const std = @import("std");
 
+/// PROTOTYPE: streaming parser. See `stream.zig`.
+pub const stream = @import("stream.zig");
+
+test {
+    _ = stream;
+}
+
 /// Represents a Four-Character Code (FourCC) identifier used in RIFF chunks.
 /// A FourCC is a 4-byte sequence that identifies the type of a chunk (e.g., "WAVE", "fmt ", "data").
 /// FourCC codes are case-sensitive and commonly used in multimedia file formats.
