@@ -10,6 +10,8 @@
 
 ## Zig version bumps
 
+Raising `minimum_zig_version` is a breaking change: the library then no longer works with earlier Zig releases, so it needs a major release (`CONTRIBUTING.md`, "Versioning and compatibility"). Mark the commit and PR title with `!` (e.g. `build!: require Zig 0.17.0`) and describe it under "Breaking Changes" in the PR description.
+
 When changing the Zig version, update all of the following together:
 
 - `minimum_zig_version` in `build.zig.zon`
