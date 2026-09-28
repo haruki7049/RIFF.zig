@@ -16,19 +16,20 @@ ______________________________________________________________________
   - `src/assertion_data.zig`: Generated expected-data constants (`XMP`, `VP8`, `VP8X`, `EXIF`) for the WebP fixture used by tests.
   - `src/assets/riff-files/`, `src/assets/chunk-data/`: Sample RIFF files and expected chunk-data fixtures used by tests. `.sf2` and `.bin` files are tracked via **Git LFS** (see `.gitattributes` / `.lfsconfig`).
   - `build.zig` & `build.zig.zon`: Build definition and package metadata. Steps: `zig build` (static library), `zig build test`, `zig build docs`.
-  - `.github/workflows/`: CI (`ci.yml`, matrix build+test across OS), Nix checks (`nix-checker.yml`), API docs deployment to GitHub Pages (`deploy-api-docs.yml`), and stale issue/PR handling (`stale-issues-pullrequests.yml`). All workflows run `git lfs pull` before using repo contents.
+  - `.github/workflows/`: CI (`ci.yml`, matrix build+test across OS), Nix checks (`nix-checker.yml`), API docs deployment to GitHub Pages (`deploy-api-docs.yml`), tag and GitHub Release creation when `version` in `build.zig.zon` changes on `main` (`release.yml`, see `CONTRIBUTING.md` "Releasing"), and stale issue/PR handling (`stale-issues-pullrequests.yml`). All workflows run `git lfs pull` before using repo contents.
 
 ______________________________________________________________________
 
 ## 2. Strict Safety & Operational Rules (Always Enforced)
 
-- **NEVER AUTO-MERGE TO MAIN**: AI agents **MUST NEVER** merge PRs, execute `git merge`, or directly push commits to the `main` branch autonomously.
+- **NEVER MERGE PULL REQUESTS**: AI agents **MUST NEVER** merge PRs (including enabling auto-merge with `gh pr merge --auto`), execute `git merge` into `main`, or directly push commits to the `main` branch autonomously.
+- **NEVER RELEASE ON YOUR OWN**: Merging a change of `version` in `build.zig.zon` to `main` publishes a tag and a GitHub Release (`release.yml`). AI agents **MUST NEVER** change `version` unless the user explicitly asks for that release.
 - **NEVER PROPOSE COMMITS OR PUSHES UNPROMPTED**: AI agents **MUST NEVER** prompt the user to commit or push, nor propose commit messages unprompted. When instructed by the user or when creating/updating pull requests on topic branches, agents may execute `git commit` and `git push` directly without seeking confirmation.
 - **Mandatory Human Approval**: AI agents may create branches, create commits, push topic branches, propose PRs, format code, and run test suites, but the final action of merging changes into `main` rests strictly with the human maintainer.
 - **Verification Before Submitting**: All changes must pass `treefmt --fail-on-change`, `zig build`, and `zig build test`.
-- **Conventional Commits**: Use conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `test:`), optionally with a scope (e.g. `build(flake.lock):`).
+- **Conventional Commits**: Use conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`, `build:`, `test:`), optionally with a scope (e.g. `build(flake.lock):`). Mark breaking changes to the public API with `!` after the type or scope (e.g. `refactor(write)!:`).
 - **Evidence First**: Base all answers and actions on actual file contents and command output. Never speculate or assume.
-- **Non-Destructive**: Never perform irreversible actions (file deletions, hard resets, remote push, Git LFS asset removal) without explicit user approval.
+- **Non-Destructive**: Never perform irreversible actions (file deletions, hard resets, rewriting pushed history such as amending or rebasing pushed commits and force-pushing, pushing to `main`, Git LFS asset removal) without explicit user approval. Ordinary pushes of new commits to a topic branch don't need approval (see above).
 - **Targeted Edits**: Make minimal, logical changes strictly necessary for the request. Do not modify unrelated files.
 - **English-Only Documentation**: All repository documentation, agent skills, code comments, commit messages, and PR descriptions must be written strictly in English.
 - **Explicit Milestone Assignment Only**: AI agents **MUST NEVER** automatically attach or set GitHub Milestones on Pull Requests or Issues unless explicitly requested or instructed by the user.
