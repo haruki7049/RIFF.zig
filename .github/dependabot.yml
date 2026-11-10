@@ -7,8 +7,6 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore"
-    labels:
-      - "chore"
 
   # Nix flakes
   - package-ecosystem: "nix"
@@ -17,5 +15,3 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore"
-    labels:
-      - "chore"
