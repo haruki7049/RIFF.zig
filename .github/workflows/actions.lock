@@ -20,7 +20,7 @@ workflows:
         - 'actions/checkout@v6.0.3'
         - 'mlugg/setup-zig@v2.2.1'
     '.github/workflows/stale-issues-pullrequests.yml':
-        - 'actions/stale@v9.0.0'
+        - 'actions/stale@v11.0.0'
     '.github/workflows/verify-actions-lockfile.yml':
         - 'actions/checkout@v7.0.1'
 dependencies:
@@ -44,9 +44,9 @@ dependencies:
         commit: 'sha1-cd2ce8fcbc39b97be8ca5fce6e763baed58fa128'
         owner_id: 44036562
         repo_id: 438112499
-    'actions/stale@v9.0.0':
-        ref: 'v9.0.0'
-        commit: 'sha1-28ca1036281a5e5922ead5184a1bbf96e5fc984e'
+    'actions/stale@v11.0.0':
+        ref: 'v11.0.0'
+        commit: 'sha1-4391f3da665fdf50b6810c1a66712fb9ba21aa93'
         owner_id: 44036562
         repo_id: 200437066
     'actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f':
