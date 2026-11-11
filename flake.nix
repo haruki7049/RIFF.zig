@@ -33,12 +33,15 @@
           ...
         }:
         let
+          ZIG = pkgs.zig_0_16;
+          ZLS = pkgs.zls_0_16;
+
           riff_zig = pkgs.stdenv.mkDerivation {
             name = "RIFF.zig";
             src = lib.cleanSource ./.;
 
             nativeBuildInputs = [
-              pkgs.zig_0_16.hook
+              ZIG.hook
             ];
 
             doCheck = true;
@@ -53,7 +56,7 @@
 
             # Zig
             programs.zig.enable = true;
-            settings.formatter.zig.command = lib.getExe pkgs.zig_0_16;
+            settings.formatter.zig.command = lib.getExe ZIG;
 
             # GitHub Actions
             programs.actionlint.enable = true;
@@ -74,11 +77,11 @@
           devShells.default = pkgs.mkShell {
             nativeBuildInputs = [
               # Compiler
-              pkgs.zig_0_16
+              ZIG
 
               # LSP
               pkgs.nil
-              pkgs.zls_0_16
+              ZLS
             ];
 
             inputsFrom = [
