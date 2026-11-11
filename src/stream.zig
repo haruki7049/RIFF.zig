@@ -332,7 +332,7 @@ pub const Iterator = struct {
         if (it.limited) |l| {
             // Bytes the sub-reader pulled from `reader` (even if still sitting
             // unread in its own buffer) are gone from `reader`.
-            const left: u64 = @intFromEnum(l.remaining);
+            const left: u64 = @backingInt(l.remaining);
             it.pos += it.pending - left;
             it.pending = left;
             it.limited = null;
