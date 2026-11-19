@@ -33,8 +33,8 @@
           ...
         }:
         let
-          ZIG = pkgs.zig_0_16;
-          ZLS = pkgs.zls_0_16;
+          ZIG = pkgs.zig_0_17;
+          ZLS = pkgs.zls_0_17;
 
           riff_zig = pkgs.stdenv.mkDerivation {
             name = "RIFF.zig";

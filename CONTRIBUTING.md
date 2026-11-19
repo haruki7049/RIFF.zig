@@ -19,7 +19,7 @@ You can also install Zig yourself and work without Nix. Note that `treefmt`, the
 
 ### Zig version
 
-This project uses Zig `0.16.0` (`minimum_zig_version` in `build.zig.zon`).
+This project uses Zig `0.17.1` (`minimum_zig_version` in `build.zig.zon`).
 
 ### Git LFS
 

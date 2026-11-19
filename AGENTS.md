@@ -9,7 +9,7 @@ ______________________________________________________________________
 `RIFF.zig` is a low-level RIFF (Resource Interchange File Format) container reader/writer library written in Zig. It has no external Zig package dependencies and is used as a foundation by higher-level projects, such as [`zigggwavvv`](https://github.com/haruki7049/zigggwavvv) (WAV).
 
 - **Development Environment**: Managed with Nix (`flake.nix`), `direnv`, and `treefmt-nix` (via `treefmt-nix`) for formatting Zig, Nix, GitHub Actions, and Markdown files. `treefmt` is available on `PATH` inside `nix develop` (or via direnv) through the default devShell's `inputsFrom`.
-- **Target Language Version**: Zig `0.16.0` (`minimum_zig_version` in `build.zig.zon`). This library has no external Zig package dependencies (`dependencies = {}`).
+- **Target Language Version**: Zig `0.17.1` (`minimum_zig_version` in `build.zig.zon`). This library has no external Zig package dependencies (`dependencies = {}`).
 - **Directory Structure**:
   - `src/root.zig`: Library entry point (public API: `Chunk`, `FourCC`, `read()`, `write()`, the size computation `write()` uses, and tests).
   - `src/stream.zig`: Streaming parser (`stream.Iterator`, a pull-style event iterator) and the tree builder `stream.readTree()`, which `read()` is implemented with, plus its tests.
