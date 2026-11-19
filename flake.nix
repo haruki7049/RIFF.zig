@@ -56,6 +56,7 @@
 
             # Zig
             programs.zig.enable = true;
+            programs.zig.package = ZIG;
             settings.formatter.zig.command = lib.getExe ZIG;
 
             # GitHub Actions
