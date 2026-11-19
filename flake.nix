@@ -33,8 +33,8 @@
           ...
         }:
         let
-          ZIG = pkgs.zig_0_17;
-          ZLS = pkgs.zls_0_17;
+          ZIG = pkgs.zig_0_16;
+          ZLS = pkgs.zls_0_16;
 
           riff_zig = pkgs.stdenv.mkDerivation {
             name = "RIFF.zig";
@@ -56,6 +56,7 @@
 
             # Zig
             programs.zig.enable = true;
+            programs.zig.package = ZIG;
             settings.formatter.zig.command = lib.getExe ZIG;
 
             # GitHub Actions
